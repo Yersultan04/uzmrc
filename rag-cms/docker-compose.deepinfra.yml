@@ -1,0 +1,21 @@
+# Облачный оверлей: эмбеддинги bge-m3 через DeepInfra (OpenAI-совместимый API).
+# Локально крутятся только postgres + qdrant + backend + frontend (~1.2 GB),
+# эмбеддер вынесен в облако → ноут не грузится.
+#
+# Запуск:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.deepinfra.yml up --build -d
+#
+# Требует в .env:
+#   EMBED_PROVIDER=openai
+#   EMBED_API_BASE_URL=https://api.deepinfra.com/v1/openai
+#   EMBED_API_KEY=<ключ DeepInfra>
+#   EMBED_MODEL_NAME=BAAI/bge-m3
+#   EMBED_DIM=1024
+services:
+  backend:
+    environment:
+      EMBED_PROVIDER: ${EMBED_PROVIDER}
+      EMBED_API_BASE_URL: ${EMBED_API_BASE_URL}
+      EMBED_API_KEY: ${EMBED_API_KEY}
+      EMBED_MODEL_NAME: ${EMBED_MODEL_NAME}
+      EMBED_DIM: ${EMBED_DIM}

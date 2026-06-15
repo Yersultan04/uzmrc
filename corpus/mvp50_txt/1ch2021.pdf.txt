@@ -1,0 +1,448 @@
+The latest information on generated loans UzMRC  criteria
+Bank name
+Loans to the 
+bank (UZS 
+billion)
+Resource 
+allocation 
+date
+Indicators
+9‐Apr
+23‐Apr
+Amount (UZS billion)
+69
+70
+Quantity
+420
+429
+Utilisation
+98%
+100%
+Amount (UZS billion)
+64
+74
+Quantity
+346
+411
+Utilisation
+106%
+124%
+Amount (UZS billion)
+48
+50.2
+Quantity
+294
+308
+Utilisation
+96%
+100%
+Amount (UZS billion)
+46
+50.0
+Quantity
+260
+282
+Utilisation
+114%
+125%
+Amount (UZS billion)
+25
+31
+Quantity
+145
+183
+Utilisation
+75%
+92%
+Amount (UZS billion)
+19
+24.5
+Quantity
+91
+117
+Utilisation
+62%
+81%
+Amount (UZS billion)
+7.1
+11.6
+Quantity
+39
+62
+Utilisation
+35%
+58%
+60.63
+                 
+303.14 
+           
+242.51
+              
+Total:               303.00   
+Total amount (UZS billion)
+277.1
+311.5
+Total quantity
+1595
+1792
+Total utilisation
+91%
+103%
+70.00 
+             
+29‐Oct
+60.00 
+             
+6‐Nov
+50.00 
+             
+24‐Dec
+40.00 
+             
+30‐Oct
+20.00 
+             
+15‐Dec
+33.00 
+             
+12‐Nov
+30.14 
+             
+30‐Dec
+Turonbank
+Asakabank
+Ipoteka bank
+SQB
+Hamkorbank
+QQB
+Agrobank
+32
+35
+45
+53
+62
+69
+70
+29
+32
+39
+47
+55
+64
+74
+48
+50
+8
+11
+21
+30
+38
+46
+50
+11
+14
+19
+25
+31
+25
+11,6
+0
+10
+20
+30
+40
+50
+60
+70
+80
+18‐Jan
+1‐Feb
+26‐Feb
+12‐Mar
+27‐Mar
+9‐Apr
+23‐Apr
+UZS billion
+Allocated loans
+Ipoteka bank
+SQB
+Hamkorbank
+QQB
+Agrobank
+Turonbank
+Asakabank
+70,3
+74,4
+50,2
+50,0
+30,5
+24,5
+11,6
+17
+1
+12,3
+11
+13,2
+13,4
+0,0
+10,0
+20,0
+30,0
+40,0
+50,0
+60,0
+70,0
+80,0
+90,0
+100,0
+Ipoteka bank
+SQB
+Hamkorbank
+QQB
+Agrobank
+Turonbank
+Asakabank
+UZS billion
+Utilisation, as of April 16 (125%)
+Utilized
+Not utilized
+
+UzMRC Resource allocation
+[CATEGORY NAME]
+[VALUE]
+[CATEGORY NAME]
+[VALUE]
+[CATEGORY NAME]
+[VALUE]
+[CATEGORY NAME]
+[VALUE]
+[CATEGORY NAME]
+[VALUE]
+[CATEGORY NAME]
+[VALUE]
+[CATEGORY NAME]
+[VALUE]
+Loans generated to banks (UZS billion)
+263   
+243   
+191   
+174   
+88   
+62   
+26   
+117   
+68   
+35   
+56   
+12   
+16,00 
+2,00 
+0,0
+50,0
+100,0
+150,0
+200,0
+250,0
+300,0
+350,0
+400,0
+Ipotekabank
+SQB
+QQB
+Hamkorbank
+Agrobank
+Turonbank
+Asakabank
+Quantity
+The number of apartments/houses purchased under 
+UzMRC funds, as of April 1
+Apartments
+Courtyard houses
+Renovation laons
+
+Loans by regions, as of April 1.
+331
+127
+115
+90
+61
+50
+55
+33
+20
+38
+12
+35
+12
+13
+125
+46
+38
+44
+33
+21
+26
+17
+8
+10
+6
+15
+6
+6
+0
+50
+100
+150
+200
+250
+300
+350
+400
+450
+# of persons
+Female (29%)
+Male (71%)
+
+Loan amount by regions, (UZS billion)
+
+Comparison table
+Bank
+Loans to the 
+bank (UZS 
+biliion)
+Date of 
+allocation
+Indicators
+1st
+January
+1st April
+Ipoteka bank
+70.0  
+29‐Oct
+Amount (UZS billion)
+28.6
+65.4
+Quantity 
+168.0
+396.0
+%
+41%
+93%
+SQB
+60.0  
+6‐Nov
+Amount (UZS billion)
+24.7
+58.0
+Quantity 
+123.0
+311.0
+%
+41%
+97%
+Hamkorbank
+50.0  
+24‐Dec
+Amount (UZS billion)
+0.0
+39.7
+Quantity 
+0.0
+234.0
+%
+0%
+79%
+QQB
+40.0  
+30‐Oct
+Amount (UZS billion)
+5.9
+40.5
+Quantity 
+33.0
+228.0
+%
+15%
+101%
+Agrobank
+33.0  
+12‐Nov
+Amount (UZS billion)
+2.9
+21.6
+Quantity 
+11.0
+122.0
+%
+9%
+65%
+Turonbank
+30.1  
+30‐Dec
+Amount (UZS billion)
+0.0
+15.2
+Quantity 
+0.0
+74.0
+%
+0%
+50%
+Asakabank
+20.0  
+15‐Dec
+Amount (UZS billion)
+0.0
+5.8
+Quantity 
+0.0
+32.0
+%
+0%
+29%
+Total:
+303.1 242.51 
+Total amount (UZS billion)
+62.08
+246.2
+Total quantity 
+335
+1397
+Total utilization (%)
+20%
+81%
+65,4
+58,0
+39,7
+40,5
+21,6
+15,2
+5,8
+22
+17
+22,8
+20
+22,5
+19,2
+0,0
+10,0
+20,0
+30,0
+40,0
+50,0
+60,0
+70,0
+80,0
+90,0
+100,0
+Ipoteka bank
+SQB
+Hamkorbank
+QQB
+Agrobank
+Turonbank
+Asakabank
+UZS billion
+Utilisation, as of April 16 (125%)
+Utilized
+Not utilized

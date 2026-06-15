@@ -1,0 +1,32 @@
+# Локальный оверлей: self-hosted эмбеддинги (bge-m3) + проброс EMBED_* в backend.
+# Запуск: docker compose -f docker-compose.prod.yml -f docker-compose.local.yml up --build -d
+services:
+  tei-bge-m3:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.7
+    container_name: ragcms-tei-bge-m3
+    restart: unless-stopped
+    command:
+      - --model-id=BAAI/bge-m3
+      - --port=80
+      - --max-batch-tokens=16384
+      - --max-concurrent-requests=64
+    volumes:
+      - hf_cache:/data
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  backend:
+    environment:
+      EMBED_PROVIDER: ${EMBED_PROVIDER}
+      EMBED_API_BASE_URL: ${EMBED_API_BASE_URL}
+      EMBED_API_KEY: ${EMBED_API_KEY}
+      EMBED_MODEL_NAME: ${EMBED_MODEL_NAME}
+      EMBED_DIM: ${EMBED_DIM}
+    depends_on:
+      tei-bge-m3:
+        condition: service_started
+
+volumes:
+  hf_cache:

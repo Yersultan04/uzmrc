@@ -1,0 +1,54 @@
+# ─── Secrets — НИКОГДА не коммитить ───
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.tok
+.tok
+
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ─── Node / frontend build ───
+node_modules/
+dist/
+.vite/
+.next/
+
+# ─── Runtime data / artifacts ───
+rag-cms/data/
+*.sqlite
+*.sqlite3
+*.db
+*.log
+
+# ─── Корпус: тяжёлые PDF рескрейпятся scraper.py; в репо только txt + манифесты + demo ───
+corpus/normative/
+corpus/mvp50/
+_rag_cms_extract/
+*.pdf
+
+# ─── Browser / test artifacts ───
+.playwright-mcp/
+page-*.png
+page-*.jpeg
+uzmrc-compare*.png
+
+# ─── IDE / OS ───
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
