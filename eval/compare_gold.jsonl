@@ -1,0 +1,10 @@
+{"clause_index": 0, "snippet": "Единоличным исполнительным органом является Генеральный директор", "primary": "duplicate", "acceptable": ["duplicate", "addition"], "note": "почти дословно повторяет норму об исполнительном органе"}
+{"clause_index": 1, "snippet": "Компетенция ГД определяется им самостоятельно, без утверждения Советом", "primary": "conflict", "acceptable": ["conflict"], "note": "противоречит: норма требует утверждения уставом/Положением"}
+{"clause_index": 2, "snippet": "защита заявителей и конфиденциальность на всех этапах", "primary": "duplicate", "acceptable": ["duplicate", "addition"], "note": "повторяет защиту заявителей, добавляя 'на всех этапах'"}
+{"clause_index": 3, "snippet": "анонимные сообщения не принимаются", "primary": "conflict", "acceptable": ["conflict"], "note": "противоречит: норма гарантирует анонимность"}
+{"clause_index": 4, "snippet": "срок рассмотрения сообщения 60 рабочих дней", "primary": "conflict", "acceptable": ["conflict", "gap"], "note": "конфликт если в базе иной срок; gap если срока нет"}
+{"clause_index": 5, "snippet": "Блок рисков и комплаенса + ежеквартальная отчётность", "primary": "addition", "acceptable": ["addition", "duplicate"], "note": "дополняет надзор за антикоррупцией"}
+{"clause_index": 6, "snippet": "нулевая терпимость к коррупционным правонарушениям", "primary": "duplicate", "acceptable": ["duplicate"], "note": "повторяет антикоррупционную норму/кодекс этики"}
+{"clause_index": 7, "snippet": "деловые подарки до 5 млн сум без согласования", "primary": "conflict", "acceptable": ["conflict", "gap"], "note": "конфликт с лимитами подарков; gap если нет нормы о лимите"}
+{"clause_index": 8, "snippet": "политика дистанционной работы до 3 дней в неделю", "primary": "gap", "acceptable": ["gap"], "note": "новая тема, нет нормы в базе"}
+{"clause_index": 9, "snippet": "переход на ESG-отчётность по GRI с 2027", "primary": "gap", "acceptable": ["gap", "addition"], "note": "новая тема ESG-отчётности"}
