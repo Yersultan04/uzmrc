@@ -20,6 +20,7 @@ from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.clients import voyage as voyage_backend
+from app.clients.voyage import _RateLimiter, _est_tokens
 from app.config import get_settings
 
 log = logging.getLogger("embeddings")
@@ -66,13 +67,25 @@ def _openai_client(base_url: str, api_key: str) -> AsyncOpenAI:
     return c
 
 
-@retry(stop=stop_after_attempt(4), wait=wait_exponential(multiplier=1, min=1, max=20))
+from functools import lru_cache as _lru_cache
+
+
+@_lru_cache
+def _embed_limiter() -> _RateLimiter:
+    """Pace OpenAI-compatible embedder requests under the provider's free-tier RPM
+    (e.g. Gemini = 100 RPM) so bulk ingest doesn't drop chunks on 429."""
+    s = get_settings()
+    return _RateLimiter(s.embed_rpm, s.embed_tpm)
+
+
+@retry(stop=stop_after_attempt(6), wait=wait_exponential(multiplier=1, min=2, max=40))
 async def _openai_embed(texts: list[str], cfg: dict) -> list[list[float]]:
     if not cfg.get("model"):
         raise RuntimeError(
             "embed_provider=openai requires a model name (snapshot.embed_model or "
             "EMBED_MODEL_NAME env)"
         )
+    await _embed_limiter().acquire(sum(_est_tokens(t) for t in texts))
     client = _openai_client(cfg["base_url"], cfg.get("api_key") or "dummy")
     res = await client.embeddings.create(model=cfg["model"], input=texts)
     return [d.embedding for d in res.data]

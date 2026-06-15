@@ -7,6 +7,10 @@
 !**/.env.example
 *.tok
 .tok
+.ragid
+
+# ─── Транзиентные рабочие артефакты ───
+corpus/corpus_unique/
 
 # ─── Python ───
 __pycache__/

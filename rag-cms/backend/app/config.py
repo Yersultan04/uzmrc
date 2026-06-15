@@ -27,6 +27,17 @@ class Settings(BaseSettings):
     voyage_api_key: str | None = None
     voyage_embed_model: str = "voyage-3"
     voyage_embed_dim: int = 1024
+    # Client-side pacing for Voyage's free tier (3 RPM / 10K TPM without a payment
+    # method). The client batches by tokens and throttles to these limits so a full
+    # corpus ingest completes instead of dying on RateLimitError. Set both to 0 (or
+    # raise them) once a payment method lifts the cap.
+    voyage_rpm: int = 3
+    voyage_tpm: int = 10000
+    # Client-side pacing for the OpenAI-compatible embedder path (Gemini, Jina, TEI,
+    # …). Gemini free embeddings allow 100 RPM — pace just under it so bulk ingest
+    # completes instead of dropping chunks on 429. 0 = unlimited (self-hosted).
+    embed_rpm: int = 0
+    embed_tpm: int = 0
 
     # Embedding backend dispatch. "voyage" (default) keeps the existing Voyage
     # cloud client. "openai" routes everything through an OpenAI-compatible

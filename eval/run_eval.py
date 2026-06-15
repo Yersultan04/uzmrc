@@ -30,7 +30,18 @@ from collections import Counter
 from pathlib import Path
 
 API = os.environ.get("UZMRC_API", "http://127.0.0.1:8088").rstrip("/")
-RAG_ID = os.environ.get("UZMRC_RAG_ID", "4065a368-96b3-4225-b599-33c41af96a3a")
+
+
+def _default_rag_id() -> str:
+    # The active RAG id is written to ../.ragid by the ingest workflow; fall back
+    # to env override or a placeholder.
+    f = Path(__file__).resolve().parent.parent / ".ragid"
+    if f.exists():
+        return f.read_text(encoding="utf-8").strip()
+    return "REPLACE_OR_SET_UZMRC_RAG_ID"
+
+
+RAG_ID = os.environ.get("UZMRC_RAG_ID") or _default_rag_id()
 EMAIL = os.environ.get("UZMRC_EMAIL", "admin@uzmrc.io")
 PASSWORD = os.environ.get("UZMRC_PASS", "UzmrcAdmin2026!")
 HERE = Path(__file__).resolve().parent
