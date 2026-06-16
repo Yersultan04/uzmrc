@@ -82,8 +82,8 @@ async def lifespan(app: FastAPI):
 _docs_on = os.getenv("EXPOSE_DOCS", "false").lower() == "true"
 
 app = FastAPI(
-    title="rag-cms",
-    description="Multi-tenant agentic RAG platform",
+    title="UzMRC",
+    description="ИИ-ассистент по нормативным документам (RAG)",
     version="0.1.0",
     lifespan=lifespan,
     docs_url="/docs" if _docs_on else None,

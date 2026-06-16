@@ -56,8 +56,8 @@ export default function App() {
       <div className="shell no-sidebar">
         <div className="topbar">
           <BrandMark />
-          <span className="brand-text">rag-cms</span>
-          <span className="muted" style={{ fontSize: 13 }}>multi-tenant agentic RAG platform</span>
+          <span className="brand-text">UzMRC</span>
+          <span className="muted" style={{ fontSize: 13 }}>ИИ-ассистент по нормативным документам</span>
           <span className="spacer" />
           <button
             className="icon"

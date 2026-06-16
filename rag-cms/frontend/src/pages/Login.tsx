@@ -56,7 +56,7 @@ export default function Login() {
       <div className="auth-card">
         <div className="auth-brand">
           <BrandMark />
-          <span>rag-cms</span>
+          <span>UzMRC</span>
         </div>
         <div className="card">
           <div className="col gap-12">
