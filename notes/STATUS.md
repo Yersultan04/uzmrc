@@ -1,6 +1,22 @@
 # UzMRC — статус и точка возврата
 
-**Обновлено:** 2026-06-16
+**Обновлено:** 2026-06-17
+
+## 🟢 Сессия 2026-06-17 (8) — Фаза 6 (демо), async-воркер+SSE для /compare, ребрендинг → ✅ MVP ЗАКРЫТ
+Закрыты три последних пункта: косметика, async Модуля 2, репетиция демо. Все три проверены вживую на боевом стеке.
+
+- **Async-воркер + SSE для `/compare` (бывшая Фаза 2 C/D) — ✅** (исполнитель: Maya). `/compare` больше не блокирует запрос.
+  - Backend: `compare/events.py::CompareEventBroker` (копия IngestEventBroker, диск `compare_runs/<run_id>/events.jsonl`), модель `CompareRun`+`CompareRunStatus`, миграция `0008_compare_runs` (chain 0007→0008, CASCADE+индексы), воркер `compare/worker.py::run_comparison` (своя db-сессия через SessionLocal, on_progress→broker.publish, tmp удаляется в finally, broker.pop). Endpoint переписан: `POST /{id}/compare`→202+{run_id,stream_token}; `GET .../runs/{run_id}`; `GET .../runs/{run_id}/stream?token=&since=` (SSE). `CompareRunOut` в schemas.
+  - Frontend: `api.ts` — `startCompare` (202) + `streamCompare` (EventSource: onProgress/onReport/onError); `RagCompare.tsx` — прогресс-бар (upload 10% + анализ 90%), SSE cleanup при unmount, весь рендер отчёта сохранён.
+  - Тесты: 30/30 старых + 6 новых (broker publish/subscribe/replay/since/pop + worker success/failure) зелёные. Ruff чисто (кроме pre-existing B008).
+- **Ребрендинг «rag-cms» → «UzMRC» — ✅:** `App.tsx` (топбар «UzMRC» + «ИИ-ассистент по нормативным документам»), `Login.tsx`, `main.py` (FastAPI title/description). `index.html` уже был. localStorage-ключи `ragcms.*` оставлены намеренно (внутр. неймспейс; смена разлогинит сессии).
+- **Фаза 6 (репетиция демо) — ✅ ПРОВЕРЕНО ВЖИВУЮ на боевом стеке (127.0.0.1):**
+  - Пересобраны backend+frontend (`docker-compose.prod.yml`, локально), миграция `0008` применилась на старте (лог `0007→0008`), таблица `compare_runs` создана.
+  - **M1 retrieval ✅** кросс-язык ru↔uz: запрос «антикоррупционная политика» → `antokorrup-politika` (0.80) + узб. `korrupsiyagaqarshi` (0.79). uz-запросы дают хиты.
+  - **M2 async end-to-end ✅** на `prikaz-vnutrenniy-2026-foreign.txt` (RAG `1e852a09`): POST→202(queued), queued→running→succeeded за **23с**. Отчёт: **5 conflict / 2 duplicate / 0 addition / 3 gap**, grounding **5/7**. Судья поймал п.4 (обход набсовета) и п.9 (ИБ) как conflict с верной нормой — рост качества против прошлой сессии (было 1 conflict/4 add).
+  - **SSE проверен:** последовательность `progress×2 → report → stream_end` (двойной stream_end безвреден: диск-replay + endpoint).
+  - **UI вживую (Playwright):** ребрендинг «UzMRC» виден на login и в топбаре; загрузка приказа → «Сравнить» → async-прогон → тост «Готово: найдено противоречий — 4» → KPI-карточки + фильтр-чипы + экспорт .md/PDF + карточки находок с бейджами/обоснованием/цитатой норм («цитата подтверждена») + рекомендация. Скриншоты: `notes/demo-shots/uzmrc-{rebrand-login,compare-progress,compare-report-fullpage}.png`.
+- **Статус MVP:** 🎉 **все 6 фаз закрыты + остаток Фазы 2 (async).** Оба модуля работают end-to-end. Остаётся только бизнес-часть: **вилка цены/срока MVP для оффера** (vs SimbirSoft $56–66K, 3–5 мес) и финальная совместная репетиция демо перед клиентом.
 
 ## 🟢 Сессия 2026-06-16 (7) — Фазы 2–5: техдолг, корпус, frontend, security+деплой
 - **Фаза 4 (Frontend):** RagCompare — фильтр-чипы по типу + экспорт (.md/печать) + раскрытие текста; брендинг title. Проверено в браузере.
