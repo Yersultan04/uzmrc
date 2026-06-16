@@ -145,3 +145,31 @@ async def embed_queries_batched(
     """Embed many query texts with as few API calls as possible (token-batched +
     rate-limited). Used by Module 2 (compare) to pre-embed all clause queries."""
     return await _embed(texts, "query", model=model)
+
+
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=1, min=1, max=20),
+    retry=retry_if_exception_type(voyageai.error.RateLimitError),
+)
+async def rerank(
+    query: str,
+    documents: list[str],
+    *,
+    top_k: int | None = None,
+    model: str | None = None,
+) -> list[tuple[int, float]]:
+    """Rerank `documents` against `query` with Voyage's dedicated reranker.
+
+    Returns (original_index, relevance_score) pairs, highest score first, limited
+    to top_k. Purpose-built and multilingual — much faster and more robust than an
+    LLM reranker, with no per-call JSON parsing or RPM storm under fan-out.
+    """
+    if not documents:
+        return []
+    s = get_settings()
+    mdl = model or s.voyage_rerank_model
+    client = get_voyage_client()
+    res = await client.rerank(query, documents, model=mdl, top_k=top_k)
+    return [(r.index, r.relevance_score) for r in res.results]

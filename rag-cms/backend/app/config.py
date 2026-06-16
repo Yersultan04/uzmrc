@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     voyage_api_key: str | None = None
     voyage_embed_model: str = "voyage-3"
     voyage_embed_dim: int = 1024
+    # Voyage's dedicated reranker (multilingual, purpose-built). Used by Module 2's
+    # per-clause candidate reranking — far faster and more robust than an LLM
+    # reranker, and no RPM storm under the per-clause fan-out. Empty → no Voyage
+    # rerank (compare falls back to the LLM reranker, then to raw hybrid order).
+    voyage_rerank_model: str = "rerank-2.5"
     # Client-side pacing for Voyage's free tier (3 RPM / 10K TPM without a payment
     # method). The client batches by tokens and throttles to these limits so a full
     # corpus ingest completes instead of dying on RateLimitError. Set both to 0 (or

@@ -17,6 +17,8 @@ from collections.abc import Awaitable, Callable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clients import embeddings
+from app.clients import voyage as voyage_backend
 from app.compare import judge as judge_mod
 from app.compare.grounding import is_quote_grounded
 from app.compare.schemas import (
@@ -26,12 +28,12 @@ from app.compare.schemas import (
     CompareSummary,
     MatchedNorm,
 )
-from app.clients import embeddings
 from app.compare.splitter import Clause, split_clauses
 from app.ingestion.parser import ParsedPage
 from app.models import Rag
 from app.presets import resolve_models_for_rag
 from app.retrieval.hybrid import hybrid_search
+from app.retrieval.rerank import RerankItem, llm_rerank
 
 log = logging.getLogger("compare.service")
 
@@ -44,9 +46,21 @@ _JUDGE_BATCH_SIZE = 8
 # Larger batches → fewer requests → friendlier to low daily request caps (Gemini
 # Flash-Lite free RPD is small). Concurrency 2 stays well under its 15 RPM.
 _JUDGE_CONCURRENCY = 2
-# Candidate norms shown to the judge per clause. Kept at 3 to cut judge prompt
-# tokens (~40% vs 5) — matters on token-budgeted LLM tiers.
-_CANDIDATES_PER_CLAUSE = 3
+# Wide retrieval pool per clause. We pull this many hybrid hits, then LLM-rerank
+# them down to the top _CANDIDATES_PER_CLAUSE the judge actually sees. Widening the
+# pool is what lets the *right* norm surface for a clause when pure hybrid score
+# buries it just outside the top-3 (the infosec / board-exclusivity misses in demo).
+_RETRIEVE_POOL = 10
+# Candidate norms shown to the judge per clause (post-rerank). On the paid stack
+# token budget is no longer the binding constraint, so 5 > the old 3 — more context
+# for the judge without flooding it.
+_CANDIDATES_PER_CLAUSE = 5
+# LLM-rerank the wide pool before judging. Promotes the topically-correct norm over
+# a lexically-similar but wrong one. Disable to fall back to raw hybrid top-K.
+_RERANK_ENABLED = True
+_RERANK_CONCURRENCY = 6
+# Blend: mostly trust the reranker's semantic judgement, keep a little retrieval prior.
+_RERANK_BLEND = 0.3
 # Safety ceiling on clauses processed in one synchronous request.
 _MAX_CLAUSES = 120
 
@@ -66,12 +80,68 @@ async def _retrieve_candidates(
     """
     try:
         return await hybrid_search(
-            db, rag_id, clause_text, top_k=_CANDIDATES_PER_CLAUSE, mode="hybrid",
+            db, rag_id, clause_text, top_k=_RETRIEVE_POOL, mode="hybrid",
             query_vector=query_vector,
         )
     except Exception as e:
         log.warning("retrieval failed for clause, treating as no candidates: %s", e)
         return []
+
+
+async def _rerank_hits(
+    clause_text: str, hits: list[tuple], rag_models: dict | None
+) -> list[tuple]:
+    """Rerank a clause's wide hit pool, return the top _CANDIDATES_PER_CLAUSE hits
+    (chunk, hit) in reranked order.
+
+    Prefers Voyage's dedicated reranker (fast, multilingual, no RPM storm). Falls
+    back to the LLM reranker, then to raw hybrid top-K — so a rerank failure never
+    breaks the comparison, only softens ranking.
+    """
+    if not hits:
+        return []
+    if not _RERANK_ENABLED or len(hits) <= 1:
+        return hits[:_CANDIDATES_PER_CLAUSE]
+
+    # 1) Voyage reranker (preferred).
+    try:
+        ranked = await voyage_backend.rerank(
+            clause_text,
+            [chunk.text for chunk, _ in hits],
+            top_k=_CANDIDATES_PER_CLAUSE,
+        )
+        reordered = [hits[i] for i, _ in ranked if 0 <= i < len(hits)]
+        if reordered:
+            return reordered[:_CANDIDATES_PER_CLAUSE]
+    except Exception as e:
+        log.warning("voyage rerank failed, trying LLM reranker: %s", e)
+
+    # 2) LLM reranker fallback.
+    rm = rag_models or {}
+    by_id = {chunk.id: (chunk, hit) for chunk, hit in hits}
+    items = [
+        RerankItem(chunk_id=chunk.id, text=chunk.text, score=getattr(hit, "score", 0.0))
+        for chunk, hit in hits
+    ]
+    try:
+        res = await llm_rerank(
+            clause_text,
+            items,
+            top_n=_CANDIDATES_PER_CLAUSE,
+            blend_with_retrieval=_RERANK_BLEND,
+            model=rm.get("llm_rerank_model"),
+            base_url=rm.get("llm_base_url"),
+            api_key=rm.get("llm_api_key"),
+            provider_order=rm.get("llm_provider_order"),
+        )
+        reordered = [by_id[it.chunk_id] for it in res.items if it.chunk_id in by_id]
+        if reordered:
+            return reordered[:_CANDIDATES_PER_CLAUSE]
+    except Exception as e:
+        log.warning("clause rerank failed, using raw top-K: %s", e)
+
+    # 3) Raw hybrid top-K.
+    return hits[:_CANDIDATES_PER_CLAUSE]
 
 
 def _candidate_views(hits: list[tuple]) -> list[dict]:
@@ -177,12 +247,17 @@ async def compare_document(
     except Exception as e:
         log.warning("batch clause embedding failed, falling back per-clause: %s", e)
 
-    # Stage 1 — retrieve candidates for every clause (Qdrant + sparse, local & cheap).
+    # Stage 1 — retrieve a wide candidate pool per clause (Qdrant + sparse, local &
+    # cheap), then LLM-rerank it down to the top norms the judge will see. Rerank is
+    # what corrects topically-wrong-but-lexically-close matches.
     retr_sem = asyncio.Semaphore(_RETRIEVE_CONCURRENCY)
+    rerank_sem = asyncio.Semaphore(_RERANK_CONCURRENCY)
 
     async def _retrieve(clause: Clause, qv: list[float] | None) -> list[dict]:
         async with retr_sem:
             hits = await _retrieve_candidates(db, rag_id, clause.text, qv)
+        async with rerank_sem:
+            hits = await _rerank_hits(clause.text, hits, rag_models)
         return _candidate_views(hits)
 
     views_per_clause = await asyncio.gather(

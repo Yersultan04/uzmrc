@@ -148,3 +148,54 @@ async def test_findings_sorted_conflicts_first(monkeypatch):
         _FakeDB(), uuid.uuid4(), [ParsedPage(page_number=1, text=text)], "new.pdf"
     )
     assert report.findings[0].relation == ClauseRelation.conflict
+
+
+# ── Reranking (Phase 1: retrieval precision) ──────────────────────────────────
+
+def _hit(text: str, score: float):
+    return (_make_chunk(text), SimpleNamespace(score=score))
+
+
+async def test_rerank_hits_voyage_reorders_and_trims(monkeypatch):
+    # Wide pool of 4; Voyage rerank promotes index 3 then 1, trim to top-2.
+    hits = [_hit(f"norm {i}", 0.5) for i in range(4)]
+    monkeypatch.setattr(service_mod, "_CANDIDATES_PER_CLAUSE", 2)
+
+    async def fake_voyage_rerank(query, docs, *, top_k=None, model=None):
+        assert len(docs) == 4
+        return [(3, 0.99), (1, 0.80)][:top_k]
+
+    monkeypatch.setattr(service_mod.voyage_backend, "rerank", fake_voyage_rerank)
+
+    out = await service_mod._rerank_hits("q", hits, None)
+    assert [c.text for c, _ in out] == ["norm 3", "norm 1"]
+
+
+async def test_rerank_hits_falls_back_to_llm_then_raw(monkeypatch):
+    hits = [_hit(f"norm {i}", 0.9 - i * 0.1) for i in range(4)]
+    monkeypatch.setattr(service_mod, "_CANDIDATES_PER_CLAUSE", 3)
+
+    async def boom_voyage(*_a, **_k):
+        raise RuntimeError("voyage down")
+
+    async def boom_llm(*_a, **_k):
+        raise RuntimeError("llm down")
+
+    monkeypatch.setattr(service_mod.voyage_backend, "rerank", boom_voyage)
+    monkeypatch.setattr(service_mod, "llm_rerank", boom_llm)
+
+    # Both rerankers fail → raw hybrid top-K, original order preserved.
+    out = await service_mod._rerank_hits("q", hits, None)
+    assert [c.text for c, _ in out] == ["norm 0", "norm 1", "norm 2"]
+
+
+async def test_rerank_hits_single_hit_skips_rerank(monkeypatch):
+    called = {"n": 0}
+
+    async def spy(*_a, **_k):
+        called["n"] += 1
+        return []
+
+    monkeypatch.setattr(service_mod.voyage_backend, "rerank", spy)
+    out = await service_mod._rerank_hits("q", [_hit("only", 0.5)], None)
+    assert len(out) == 1 and called["n"] == 0  # short-circuit, no rerank call

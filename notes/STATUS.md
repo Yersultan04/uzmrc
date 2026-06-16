@@ -2,6 +2,14 @@
 
 **Обновлено:** 2026-06-16
 
+## 🟢 Сессия 2026-06-16 (6) — Фаза 1: платный стек + Voyage reranker (точность retrieval)
+- **Платный стек:** Voyage billing + OpenRouter credits активны. Замер: OpenRouter gpt-oss судья=130с vs Cerebras=14с → **гибрид**: Voyage (эмбеддинги, paid) + Cerebras gpt-oss-120b (судья/rerank, 14с) + OpenRouter paid (фолбэк). `.env` (gitignored), бэкап `.env.bak.*`.
+- **Voyage reranker `rerank-2.5`** в Модуле 2 (`compare/service.py::_rerank_hits`, `clients/voyage.py::rerank`, config `voyage_rerank_model`): retrieval-пул 10 → rerank → топ-5 судье. Фолбэк-цепочка Voyage → LLM-rerank → raw.
+  - LLM-rerank (gpt-oss) пробовал первым: качество ОК, но **201с** (RPM-шторм Cerebras: 9× 429, ретраи 60с) + хрупкий JSON. Voyage rerank снял обе проблемы.
+  - **Демо-приказ: grounding 4/6 → 6/6 (100%), 21с, нормы тематически корректны.** п.4 (обход набсовета) addition→**conflict grounded** ✅. п.9 (ИБ)→gap (безопасно, recall, чинится Фазой 3).
+  - 3 новых rerank-теста, 7/7 compare-тестов зелёные, ruff чисто.
+- Артефакты: `notes/MVP-ROADMAP.md` (end-to-end план, 6 фаз, demo-ready 30 июн), `notes/compare-demo-foreign-prikaz.{md,json}` (v5).
+
 ## 🟢 Сессия 2026-06-16 (5) — закалка Модуля 2, item #1: промпт судьи (conflict-detection)
 Демо вскрыло, что судья помечает ослабление/обход нормы как «addition». Переписаны промпты `compare/judge.py`:
 - Общий блок правил `_RELATION_RULES` (DRY single+batch), 4-шаговая процедура выбора relation, тест «conflict = нельзя исполнить, не нарушив норму», few-shot примеры (conflict/duplicate/addition), запрет over-flag. Дословность quote усилена.
