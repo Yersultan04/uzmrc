@@ -88,6 +88,9 @@ services:
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
       DEFAULT_FTS_LANGUAGE: ${DEFAULT_FTS_LANGUAGE:-simple}
+      # Interactive API docs (/docs, /redoc) off by default — public demo safety.
+      EXPOSE_DOCS: ${EXPOSE_DOCS:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       - rag_data:/data
     depends_on:

@@ -16,6 +16,7 @@ from app.auth import (
 )
 from app.db import get_db
 from app.models import User, UserRole
+from app.ratelimit import login_rate_limit
 from app.schemas import (
     TokenOut,
     UserAdminCreate,
@@ -71,7 +72,7 @@ async def bootstrap_register(
     return TokenOut(access_token=token, expires_at=expires, user=UserOut.model_validate(user))
 
 
-@router.post("/login", response_model=TokenOut)
+@router.post("/login", response_model=TokenOut, dependencies=[Depends(login_rate_limit)])
 async def login(payload: UserLogin, db: AsyncSession = Depends(get_db)) -> TokenOut:
     user = (
         await db.execute(select(User).where(User.email == payload.email.lower().strip()))

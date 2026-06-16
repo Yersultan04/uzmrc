@@ -45,10 +45,29 @@ async def _bootstrap_admin_from_env() -> None:
         log.info("bootstrap admin created from env: %s", user.email)
 
 
+_DEFAULT_JWT_SECRET = "change-me-to-a-long-random-string"
+
+
+def _assert_secure_config() -> None:
+    """Fail fast on insecure config before serving any request.
+
+    A missing/leftover-default JWT secret would silently sign tokens with a known
+    public string — anyone could forge an admin JWT. Refuse to start instead.
+    """
+    s = settings
+    if s.jwt_secret == _DEFAULT_JWT_SECRET or len(s.jwt_secret) < 32:
+        raise RuntimeError(
+            "JWT_SECRET is unset, default, or too short (<32 chars). Set a strong "
+            "JWT_SECRET in the environment before starting. Generate one with: "
+            'python -c "import secrets; print(secrets.token_urlsafe(48))"'
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Schema is managed by Alembic (`alembic upgrade head`). Do not create_all here —
     # silent table creation diverges from migration history and bites on the first ALTER.
+    _assert_secure_config()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     try:
         await _bootstrap_admin_from_env()
@@ -58,11 +77,18 @@ async def lifespan(app: FastAPI):
     await engine.dispose()
 
 
+# Interactive API docs (/docs, /redoc) leak the full API surface — keep them off
+# for a public demo. Set EXPOSE_DOCS=true to re-enable locally.
+_docs_on = os.getenv("EXPOSE_DOCS", "false").lower() == "true"
+
 app = FastAPI(
     title="rag-cms",
     description="Multi-tenant agentic RAG platform",
     version="0.1.0",
     lifespan=lifespan,
+    docs_url="/docs" if _docs_on else None,
+    redoc_url="/redoc" if _docs_on else None,
+    openapi_url="/openapi.json" if _docs_on else None,
 )
 
 app.add_middleware(

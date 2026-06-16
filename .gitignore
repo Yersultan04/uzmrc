@@ -61,3 +61,7 @@ uzmrc-compare*.png
 .DS_Store
 Thumbs.db
 *.swp
+
+# DB backups — contain data, never commit
+rag-cms/backups/
+*.sql.gz
