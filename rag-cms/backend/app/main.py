@@ -1,4 +1,5 @@
 import logging
+import os
 import uuid
 from contextlib import asynccontextmanager
 
@@ -11,6 +12,14 @@ from app.auth import hash_password
 from app.config import get_settings
 from app.db import SessionLocal, engine
 from app.models import User, UserRole
+
+# App loggers ("ingestion", "startup", ...) have no handler of their own —
+# uvicorn only configures its own loggers, leaving the root untouched. Configure
+# the root logger so our INFO logs (e.g. embed-cache hit rates) reach stdout.
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 
 log = logging.getLogger("startup")
 
