@@ -2,6 +2,13 @@
 
 **Обновлено:** 2026-06-16
 
+## 🟢 Сессия 2026-06-16 (5) — закалка Модуля 2, item #1: промпт судьи (conflict-detection)
+Демо вскрыло, что судья помечает ослабление/обход нормы как «addition». Переписаны промпты `compare/judge.py`:
+- Общий блок правил `_RELATION_RULES` (DRY single+batch), 4-шаговая процедура выбора relation, тест «conflict = нельзя исполнить, не нарушив норму», few-shot примеры (conflict/duplicate/addition), запрет over-flag. Дословность quote усилена.
+- Итерации: v2 (тай-брейкер «при сомнении conflict») перестарался (5 conflict / 0 add / 0 dup) → откат к балансу v3.
+- **Результат на «чужом» приказе: было 1 conflict/1 dup/4 add/4 gap → стало 3 conflict / 1 dup / 2 add / 4 gap.** Целевые фиксы пойманы: п.2 (подарки 10 МРОТ) addition→**conflict**; п.3 (анонимные) дубль сохранён; п.1 (декларация КИ) остался addition (не ложный conflict). 9 тестов судьи зелёные, ruff чисто.
+- Остаточные промахи пп.4 (обход набсовета) и 9 (ИБ на чужую норму) — упираются в **точность retrieval (item #2, следующий)**, не в судью. Артефакт: `notes/compare-demo-foreign-prikaz.md`.
+
 ## 🟢 Сессия 2026-06-16 (2) — ⭐ EMBEDDING-КЭШ (Tier-0) реализован и проверен на живом Postgres
 Главный невзятый фикс закрыт: реиндекс того же корпуса больше НЕ жжёт квоту эмбеддера.
 - **Модель `EmbeddingCache` + миграция `0007_embedding_cache`** (Postgres): `hash` PK = `sha256(model_sig | text)`, `model_sig`, `dim`, `vector` JSONB, `created_at`.
