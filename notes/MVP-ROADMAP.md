@@ -97,12 +97,21 @@
 - **Осталось (опц.):** чат с цитатами `/rag/:id/chat` визуально проверить; SSE-прогресс для `/compare` — зависит от async-воркера (Фаза 2 C/D).
 - **DoD:** ✅ сценарий `/compare` проходит кликом без шероховатостей; UI клиент-готов.
 
-### Фаза 5 — Деплой demo-окружения — Maya + Shield · ~1 день
-Закрывает I.
-- Поднять на стабильном хосте (VPS / Oracle free VM / сервер) под demo-доменом, HTTPS.
-- Bootstrap-админ, бэкап Postgres, healthcheck, авто-рестарт (`restart: unless-stopped` уже есть).
-- Базовый security-проход (Shield): JWT-секрет, CORS, нет открытой регистрации, секреты только в env.
-- **DoD:** demo-URL доступен, переживает рестарт, есть дамп БД.
+### Фаза 5 — Деплой demo-окружения — ✅ ПОДГОТОВКА ГОТОВА (16 июн) — Maya + Shield
+Закрывает I. Стек deploy-ready; остался выбор публичного хоста (решение клиента/Director).
+- **Security-проход (Shield-аудит) — ✅ выполнен.** Найдено и исправлено перед публичной экспозицией:
+  - C-2: startup-guard на `JWT_SECRET` (отказ старта при дефолте/<32 симв.).
+  - H-2: `/docs` `/redoc` `/openapi.json` off по умолчанию (`EXPOSE_DOCS=false`).
+  - H-1: rate-limit login 10/мин/IP (`app/ratelimit.py`, без зависимостей).
+  - H-3: nginx security-заголовки (CSP, HSTS, X-Frame, nosniff, Referrer, Permissions) — вкл. обход add_header-наследования.
+  - C-1: `.env.bak` с ключами — проверено, НЕ утекли в git; удалены; ключи не ротированы.
+  - Чисто (Shield): tenant-изоляция, bcrypt, регистрация закрыта, path-traversal-safe, JWT HS256, нет SQL-инъекций.
+- **Бэкап Postgres — ✅** `scripts/backup-db.sh` (pg_dump→gz, retention), проверен (дамп 5.5M). `backups/` в gitignore.
+- **Авто-рестарт** `restart: unless-stopped` на всех контейнерах ✅. Healthcheck `/health` ✅.
+- **Runbook — ✅** `notes/DEPLOY-RUNBOOK.md` (подъём, проверка, 3 варианта хоста, restore).
+- **Всё проверено вживую:** /docs=404, login 10×401→429, 6 заголовков на `/`, валидный login=200, CSP не ломает фронт.
+- **⏸ Остался ВЫБОР ХОСТА (требует решения):** (A) Cloudflare Quick Tunnel — публичный HTTPS за минуту, $0, эфемерно, машина онлайн; (B) VPS/Oracle free VM — постоянный; (C) on-prem сервер клиента. `cloudflared` уже установлен на машине.
+- **DoD:** demo-URL доступен ⟵ ждёт выбора хоста; переживает рестарт ✅; дамп БД ✅; security ✅.
 
 ### Фаза 6 — Приёмка + репетиция демо — Chelsea + Leo + Vex · ~1 день
 Закрывает H (сценарий).
