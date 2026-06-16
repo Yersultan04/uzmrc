@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.clients import embeddings
 from app.clients import voyage as voyage_backend
 from app.compare import judge as judge_mod
-from app.compare.grounding import is_quote_grounded
+from app.compare.grounding import best_verbatim_window, is_quote_grounded
 from app.compare.schemas import (
     ClauseFinding,
     ClauseRelation,
@@ -169,6 +169,14 @@ def _finding_from_verdict(
     if verdict.matched_candidate is not None and verdict.relation != ClauseRelation.gap:
         cv = candidate_views[verdict.matched_candidate]
         quote = verdict.quote or cv["text"][:300]
+        grounded = is_quote_grounded(quote, cv["text"])
+        # Salvage: if the judge paraphrased (not grounded), swap in the closest
+        # verbatim sentence from the norm so the citation shown is always real.
+        if not grounded:
+            salvaged = best_verbatim_window(quote, cv["text"])
+            if salvaged is not None:
+                quote = salvaged
+                grounded = True
         matched = MatchedNorm(
             chunk_id=cv["chunk_id"],
             file_id=cv["file_id"],
@@ -177,7 +185,7 @@ def _finding_from_verdict(
             page_end=cv["page_end"],
             quote=quote,
             score=cv["score"],
-            grounded=is_quote_grounded(quote, cv["text"]),
+            grounded=grounded,
         )
 
     return ClauseFinding(
