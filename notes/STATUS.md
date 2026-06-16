@@ -2,6 +2,17 @@
 
 **Обновлено:** 2026-06-16
 
+## 🟢 Сессия 2026-06-16 (7) — Фазы 2–5: техдолг, корпус, frontend, security+деплой
+- **Фаза 4 (Frontend):** RagCompare — фильтр-чипы по типу + экспорт (.md/печать) + раскрытие текста; брендинг title. Проверено в браузере.
+- **Фаза 3 (Корпус):** найдено 5/50 файлов в `parsing`/0-чанков (краш воркера) → восстановлены, корпус 50/50. Исправило п.9 ИБ (gap→conflict). Grounding: salvage + homoglyph-folding.
+- **Фаза 2 (E/F):** `.env.example`; Qdrant-чистка при удалении уже в коде. (C/D async-воркер — остаток.)
+- **Фаза 5 (Security+Deploy) — ✅ ГОТОВО + ЖИВОЙ DEMO:**
+  - Shield-аудит + фиксы: JWT startup-guard, /docs off (`EXPOSE_DOCS`), rate-limit login 10/мин/IP (`app/ratelimit.py`), nginx security-заголовки (CSP/HSTS/...). Проверено вживую.
+  - Backup `scripts/backup-db.sh` (дамп 5.5M), runbook `notes/DEPLOY-RUNBOOK.md`.
+  - **Публичный demo поднят (Cloudflare Tunnel, авторизовано):** проверен end-to-end через HTTPS — страница 200, заголовки, API, login 200, CSP не ломает фронт. URL эфемерный (`*.trycloudflare.com`, живёт пока ПК+туннель онлайн; меняется при перезапуске — `cloudflared tunnel --url http://localhost:8090`).
+  - Креды demo: `admin@uzmrc.io` / см. `.env` `BOOTSTRAP_ADMIN_PASSWORD`.
+- **Статус MVP:** ядро + оба модуля готовы; 5/6 фаз закрыто. Осталось: Фаза 6 (репетиция демо, совместно) + опц. Фаза 2 C/D (async-воркер для длинных регламентов). Косметика: внутренние надписи «rag-cms» → UzMRC.
+
 ## 🟢 Сессия 2026-06-16 (6) — Фаза 1: платный стек + Voyage reranker (точность retrieval)
 - **Платный стек:** Voyage billing + OpenRouter credits активны. Замер: OpenRouter gpt-oss судья=130с vs Cerebras=14с → **гибрид**: Voyage (эмбеддинги, paid) + Cerebras gpt-oss-120b (судья/rerank, 14с) + OpenRouter paid (фолбэк). `.env` (gitignored), бэкап `.env.bak.*`.
 - **Voyage reranker `rerank-2.5`** в Модуле 2 (`compare/service.py::_rerank_hits`, `clients/voyage.py::rerank`, config `voyage_rerank_model`): retrieval-пул 10 → rerank → топ-5 судье. Фолбэк-цепочка Voyage → LLM-rerank → raw.
