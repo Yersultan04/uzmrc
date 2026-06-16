@@ -15,7 +15,7 @@ import {
   ShieldAlert,
   UploadCloud,
 } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   api,
@@ -40,32 +40,91 @@ export default function RagCompare() {
   const toast = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
-  const [progress, setProgress] = useState(0);
+  // uploadPct: 0-1 upload progress; analyzePct: 0-1 analysis progress (done/total clauses)
+  const [uploadPct, setUploadPct] = useState(0);
+  const [analyzeDone, setAnalyzeDone] = useState(0);
+  const [analyzeTotal, setAnalyzeTotal] = useState(0);
   const [report, setReport] = useState<CompareReport | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
+
+  // Cleanup SSE on unmount
+  useEffect(() => {
+    return () => {
+      cleanupRef.current?.();
+    };
+  }, []);
 
   async function onCompare() {
     if (!id || !file) return;
     setBusy(true);
     setReport(null);
-    setProgress(0);
+    setUploadPct(0);
+    setAnalyzeDone(0);
+    setAnalyzeTotal(0);
+
+    // Close any existing SSE stream
+    cleanupRef.current?.();
+    cleanupRef.current = null;
+
     try {
-      const rep = await api.compareDocument(id, file, (loaded, total) => {
-        setProgress(total > 0 ? loaded / total : 0);
+      const run = await api.startCompare(id, file, (loaded, total) => {
+        setUploadPct(total > 0 ? loaded / total : 0);
       });
-      setReport(rep);
-      const conflicts = rep.summary.conflict;
-      toast.success(
-        conflicts > 0
-          ? `Готово: найдено противоречий — ${conflicts}`
-          : 'Готово: критических противоречий не найдено',
-      );
+
+      if (!run.stream_token) {
+        throw new Error('no stream_token in response');
+      }
+
+      // Upload done — switch to analysis phase
+      setUploadPct(1);
+
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = api.streamCompare(
+          id,
+          run.id,
+          run.stream_token!,
+          {
+            onProgress: (done, total) => {
+              setAnalyzeDone(done);
+              setAnalyzeTotal(total);
+            },
+            onReport: (rep) => {
+              setReport(rep);
+              const conflicts = rep.summary.conflict;
+              toast.success(
+                conflicts > 0
+                  ? `Готово: найдено противоречий — ${conflicts}`
+                  : 'Готово: критических противоречий не найдено',
+              );
+              resolve();
+            },
+            onError: (msg) => {
+              reject(new Error(msg));
+            },
+          },
+        );
+        cleanupRef.current = cleanup;
+      });
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
       setBusy(false);
+      cleanupRef.current = null;
     }
   }
+
+  const analyzeLabel = (() => {
+    if (uploadPct < 1) return `Загрузка ${Math.round(uploadPct * 100)}%`;
+    if (analyzeTotal === 0) return 'Подготовка анализа…';
+    return `Анализ положений: ${analyzeDone} / ${analyzeTotal}`;
+  })();
+
+  const progressPct = (() => {
+    if (uploadPct < 1) return uploadPct * 0.1; // upload = first 10%
+    if (analyzeTotal === 0) return 0.1;
+    return 0.1 + (analyzeDone / analyzeTotal) * 0.9;
+  })();
 
   return (
     <div className="col" style={{ gap: 20 }}>
@@ -130,13 +189,11 @@ export default function RagCompare() {
 
         {busy && (
           <div className="col gap-4">
-            <div className="subtle" style={{ fontSize: 12 }}>
-              {progress < 1 ? `Загрузка ${Math.round(progress * 100)}%` : 'Анализ положений (это может занять до минуты)…'}
-            </div>
+            <div className="subtle" style={{ fontSize: 12 }}>{analyzeLabel}</div>
             <div className="upload-bar">
               <div
                 className="upload-bar-fill"
-                style={{ width: progress < 1 ? `${Math.round(progress * 100)}%` : '100%' }}
+                style={{ width: `${Math.round(progressPct * 100)}%` }}
               />
             </div>
           </div>

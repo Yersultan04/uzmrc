@@ -50,6 +50,13 @@ class AgentRunStatus(str, enum.Enum):
     failed = "failed"
 
 
+class CompareRunStatus(str, enum.Enum):
+    queued = "queued"
+    running = "running"
+    succeeded = "succeeded"
+    failed = "failed"
+
+
 class UserRole(str, enum.Enum):
     user = "user"
     admin = "admin"
@@ -136,6 +143,9 @@ class Rag(Base):
         back_populates="rag", cascade="all, delete-orphan"
     )
     chat_sessions: Mapped[list["ChatSession"]] = relationship(
+        back_populates="rag", cascade="all, delete-orphan"
+    )
+    compare_runs: Mapped[list["CompareRun"]] = relationship(
         back_populates="rag", cascade="all, delete-orphan"
     )
     members: Mapped[list["RagMember"]] = relationship(
@@ -247,6 +257,30 @@ class IngestRun(Base):
     )
 
     rag: Mapped["Rag"] = relationship(back_populates="runs")
+
+
+class CompareRun(Base):
+    __tablename__ = "compare_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    rag_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("rags.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[CompareRunStatus] = mapped_column(
+        Enum(CompareRunStatus, name="compare_run_status"),
+        default=CompareRunStatus.queued,
+        nullable=False,
+    )
+    filename: Mapped[str | None] = mapped_column(String(512))
+    stream_token: Mapped[str | None] = mapped_column(String(64), index=True)
+    report: Mapped[dict | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    rag: Mapped["Rag"] = relationship(back_populates="compare_runs")
 
 
 class ChatSession(Base):

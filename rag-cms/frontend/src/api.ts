@@ -110,6 +110,20 @@ export interface TokenResponse {
 }
 
 // --- Module 2: document comparison ---
+export type CompareRunStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+
+export interface CompareRun {
+  id: string;
+  rag_id: string;
+  status: CompareRunStatus;
+  filename: string | null;
+  stream_token: string | null;
+  report: CompareReport | null;
+  error: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
 export type ClauseRelation = 'duplicate' | 'conflict' | 'addition' | 'gap';
 
 export interface MatchedNorm {
@@ -284,19 +298,20 @@ export const api = {
       xhr.send(fd);
     }),
 
-  /** Module 2 — upload a regulation and compare it against the RAG's norm base. */
-  compareDocument: (
+  /** Module 2 — upload a regulation file and start an async compare run.
+   *  Returns immediately with run_id + stream_token (202). */
+  startCompare: (
     rag_id: string,
     file: File,
-    onProgress?: (loaded: number, total: number) => void,
-  ): Promise<CompareReport> =>
+    onUploadProgress?: (loaded: number, total: number) => void,
+  ): Promise<CompareRun> =>
     new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `/api/rags/${rag_id}/compare`);
       const headers = authHeaders();
       for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
       xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total);
+        if (e.lengthComputable && onUploadProgress) onUploadProgress(e.loaded, e.total);
       };
       xhr.onload = () => {
         if (xhr.status === 401) {
@@ -307,7 +322,7 @@ export const api = {
         }
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
-            resolve(JSON.parse(xhr.responseText));
+            resolve(JSON.parse(xhr.responseText) as CompareRun);
           } catch (e) {
             reject(e as Error);
           }
@@ -321,6 +336,59 @@ export const api = {
       fd.append('file', file);
       xhr.send(fd);
     }),
+
+  /** Module 2 — subscribe to SSE events for a running compare.
+   *  Calls onProgress({done,total}) for each progress tick,
+   *  onReport(report) when the final report arrives, onError on failure.
+   *  Returns a cleanup function that closes the EventSource. */
+  streamCompare: (
+    rag_id: string,
+    run_id: string,
+    token: string,
+    handlers: {
+      onProgress?: (done: number, total: number) => void;
+      onReport?: (report: CompareReport) => void;
+      onError?: (message: string) => void;
+    },
+    since = 0,
+  ): (() => void) => {
+    const url = `/api/rags/${rag_id}/compare/runs/${run_id}/stream?token=${encodeURIComponent(token)}&since=${since}`;
+    const es = new EventSource(url);
+
+    es.addEventListener('progress', (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data).payload as { done: number; total: number };
+        handlers.onProgress?.(payload.done, payload.total);
+      } catch { /* ignore parse errors */ }
+    });
+
+    es.addEventListener('report', (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data).payload as CompareReport;
+        handlers.onReport?.(payload);
+      } catch { /* ignore parse errors */ }
+    });
+
+    es.addEventListener('error', (e: MessageEvent) => {
+      try {
+        const payload = JSON.parse(e.data).payload as { message: string };
+        handlers.onError?.(payload.message ?? 'comparison failed');
+      } catch {
+        handlers.onError?.('comparison failed');
+      }
+    });
+
+    es.addEventListener('stream_end', () => {
+      es.close();
+    });
+
+    es.onerror = () => {
+      es.close();
+      handlers.onError?.('SSE connection lost');
+    };
+
+    return () => es.close();
+  },
 
   startIngest: (rag_id: string, force = false) =>
     request<IngestRun>('POST', `/rags/${rag_id}/index${force ? '?force=true' : ''}`),

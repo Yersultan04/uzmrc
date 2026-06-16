@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.models import FileStatus, IngestRunStatus, RagStatus, UserRole
+from app.models import CompareRunStatus, FileStatus, IngestRunStatus, RagStatus, UserRole
 
 
 class UserRegister(BaseModel):
@@ -160,3 +160,17 @@ class ChunkOut(BaseModel):
     heading: str | None
     text: str
     token_count: int
+
+
+class CompareRunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    rag_id: uuid.UUID
+    status: CompareRunStatus
+    filename: str | None
+    stream_token: str | None = None
+    report: dict | None = None
+    error: str | None = None
+    created_at: datetime
+    finished_at: datetime | None = None
