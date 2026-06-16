@@ -2,16 +2,20 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   CircleSlash,
   Copy,
+  Download,
   FileText,
   Loader2,
   PlusCircle,
+  Printer,
   ShieldCheck,
   ShieldAlert,
   UploadCloud,
 } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   api,
@@ -144,8 +148,26 @@ export default function RagCompare() {
   );
 }
 
+const FILTERS: { key: ClauseRelation | 'all'; label: string }[] = [
+  { key: 'all', label: 'Все' },
+  { key: 'conflict', label: 'Противоречия' },
+  { key: 'duplicate', label: 'Дубли' },
+  { key: 'addition', label: 'Дополнения' },
+  { key: 'gap', label: 'Пробелы' },
+];
+
 function Report({ report }: { report: CompareReport }) {
   const s = report.summary;
+  const [filter, setFilter] = useState<ClauseRelation | 'all'>('all');
+
+  const visible = useMemo(
+    () => (filter === 'all' ? report.findings : report.findings.filter((f) => f.relation === filter)),
+    [report.findings, filter],
+  );
+
+  const countFor = (k: ClauseRelation | 'all') =>
+    k === 'all' ? report.findings.length : report.findings.filter((f) => f.relation === k).length;
+
   return (
     <>
       <div className="grid cols-4">
@@ -168,18 +190,52 @@ function Report({ report }: { report: CompareReport }) {
       )}
 
       <div className="card flush">
-        <div className="row" style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+        <div className="row" style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', gap: 8 }}>
           <strong>Отчёт по «{report.filename}»</strong>
           <span className="spacer" style={{ flex: 1 }} />
-          <span className="subtle">{report.findings.length} положений · противоречия сверху</span>
+          <button className="ghost" style={{ fontSize: 12.5 }} onClick={() => downloadMarkdown(report)}>
+            <Download size={13} /> Скачать .md
+          </button>
+          <button className="ghost" style={{ fontSize: 12.5 }} onClick={() => window.print()}>
+            <Printer size={13} /> Печать / PDF
+          </button>
         </div>
+
+        <div className="row gap-8" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
+          {FILTERS.map((ft) => {
+            const n = countFor(ft.key);
+            const active = filter === ft.key;
+            return (
+              <button
+                key={ft.key}
+                onClick={() => setFilter(ft.key)}
+                disabled={n === 0 && ft.key !== 'all'}
+                style={{
+                  fontSize: 12.5, padding: '4px 11px', borderRadius: 999, cursor: 'pointer',
+                  border: `1px solid ${active ? 'var(--accent-2)' : 'var(--border)'}`,
+                  background: active ? 'var(--accent-soft)' : 'transparent',
+                  color: active ? 'var(--accent-2)' : 'var(--text-dim)',
+                  opacity: n === 0 && ft.key !== 'all' ? 0.4 : 1,
+                }}
+              >
+                {ft.label} · {n}
+              </button>
+            );
+          })}
+        </div>
+
         <div className="col" style={{ padding: 16, gap: 12 }}>
-          {report.findings.map((f) => (
+          {visible.map((f) => (
             <FindingCard key={f.clause_index} f={f} />
           ))}
           {report.findings.length === 0 && (
             <div className="subtle" style={{ textAlign: 'center', padding: 20 }}>
               Положения не распознаны в документе.
+            </div>
+          )}
+          {report.findings.length > 0 && visible.length === 0 && (
+            <div className="subtle" style={{ textAlign: 'center', padding: 20 }}>
+              Нет положений этого типа.
             </div>
           )}
         </div>
@@ -188,9 +244,49 @@ function Report({ report }: { report: CompareReport }) {
   );
 }
 
+const RELATION_PLAIN: Record<ClauseRelation, string> = {
+  conflict: 'ПРОТИВОРЕЧИЕ',
+  gap: 'ПРОБЕЛ',
+  addition: 'ДОПОЛНЕНИЕ',
+  duplicate: 'ДУБЛЬ',
+};
+
+function downloadMarkdown(report: CompareReport) {
+  const s = report.summary;
+  const lines: string[] = [
+    `# Отчёт сравнения — «${report.filename}»`,
+    '',
+    `Положений: ${s.total_clauses} · Противоречий: ${s.conflict} · Пробелов: ${s.gap} · Дублей: ${s.duplicate} · Дополнений: ${s.addition}`,
+    '',
+  ];
+  for (const f of report.findings) {
+    lines.push(`## [${RELATION_PLAIN[f.relation]}] ${f.clause_label || `Положение ${f.clause_index + 1}`}`);
+    lines.push('');
+    lines.push(f.clause_text.trim());
+    lines.push('');
+    if (f.rationale) lines.push(`**Обоснование:** ${f.rationale}`);
+    if (f.matched_norm) {
+      const m = f.matched_norm;
+      lines.push(`**Норма базы:** ${m.filename}${m.page_start ? `, стр. ${m.page_start}` : ''}${m.grounded ? ' (цитата подтверждена)' : ' (цитата не подтверждена)'}`);
+      lines.push(`> ${m.quote.trim()}`);
+    }
+    if (f.recommendation) lines.push(`**Рекомендация:** ${f.recommendation}`);
+    lines.push('');
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `compare-${report.filename.replace(/\.[^.]+$/, '')}.md`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function FindingCard({ f }: { f: ClauseFinding }) {
   const meta = RELATION_META[f.relation];
   const Icon = meta.icon;
+  const [expanded, setExpanded] = useState(false);
+  const long = f.clause_text.length > 400;
   return (
     <div
       className="col gap-8"
@@ -224,7 +320,17 @@ function FindingCard({ f }: { f: ClauseFinding }) {
       </div>
 
       <div style={{ fontSize: 13.5, lineHeight: 1.5 }}>
-        {truncate(f.clause_text, 400)}
+        {expanded ? f.clause_text : truncate(f.clause_text, 400)}
+        {long && (
+          <button
+            className="ghost"
+            style={{ marginLeft: 6, fontSize: 12, padding: '1px 6px', color: 'var(--accent-2)' }}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            {expanded ? 'свернуть' : 'показать полностью'}
+          </button>
+        )}
       </div>
 
       {f.rationale && (
