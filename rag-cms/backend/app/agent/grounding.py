@@ -7,18 +7,33 @@ from difflib import SequenceMatcher
 
 from app.agent.schemas import Citation, PoolEntry
 
-
 _WS = re.compile(r"\s+")
 _PUNCT = re.compile(r"[\W_]+", re.UNICODE)
 
+# OCR of Cyrillic scans frequently mixes in Latin homoglyphs (е↔e, с↔c, о↔o, …),
+# so a verbatim quote and its source chunk can differ only by these confusables and
+# fail grounding (→ confidence collapses to 0 on a correct answer). Fold the Latin
+# half of each confusable pair onto its Cyrillic twin before comparing. Applied to
+# BOTH sides, so legitimate all-Latin (Uzbek) matches are preserved.
+_HOMOGLYPHS = str.maketrans({
+    "a": "а", "c": "с", "e": "е", "o": "о", "p": "р", "x": "х", "y": "у",
+    "b": "ь", "h": "н", "k": "к", "m": "м", "t": "т",
+    "A": "а", "B": "в", "C": "с", "E": "е", "H": "н", "K": "к", "M": "м",
+    "O": "о", "P": "р", "T": "т", "X": "х", "Y": "у",
+})
+
+
+def _fold(s: str) -> str:
+    return s.translate(_HOMOGLYPHS)
+
 
 def _norm(s: str) -> str:
-    return _WS.sub(" ", s).strip().lower()
+    return _fold(_WS.sub(" ", s).strip().lower())
 
 
 def _norm_loose(s: str) -> str:
     """Aggressive normalization for fuzzy match — strip all non-alphanumerics."""
-    return _PUNCT.sub(" ", s).lower()
+    return _fold(_PUNCT.sub(" ", s).lower())
 
 
 @dataclass
