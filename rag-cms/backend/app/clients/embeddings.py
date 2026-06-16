@@ -152,11 +152,31 @@ async def embed_documents_batched(
             texts, batch_size, on_batch, model=cfg["model"]
         )
 
+    # Token-aware sub-batching. A fixed count (batch_size=64) blows past the
+    # provider's per-minute token cap on big docs (e.g. Gemini free = 30K TPM):
+    # 64 long chunks in one request = tens of thousands of tokens -> 429. Mirror
+    # the Voyage path's _TOKEN_BUDGET idea and cap each request by est. tokens too.
+    s = get_settings()
+    token_budget = int(s.embed_tpm * 0.6) if s.embed_tpm and s.embed_tpm > 0 else 18000
+
+    # Build sub-batches bounded by BOTH count (batch_size) and est. tokens.
+    sub_batches: list[list[str]] = []
+    cur: list[str] = []
+    cur_tokens = 0
+    for t in texts:
+        tk = _est_tokens(t)
+        if cur and (len(cur) >= batch_size or cur_tokens + tk > token_budget):
+            sub_batches.append(cur)
+            cur, cur_tokens = [], 0
+        cur.append(t)
+        cur_tokens += tk
+    if cur:
+        sub_batches.append(cur)
+
     out: list[list[float]] = []
-    total = (len(texts) + batch_size - 1) // batch_size if texts else 0
+    total = len(sub_batches)
     done = 0
-    for i in range(0, len(texts), batch_size):
-        chunk = texts[i : i + batch_size]
+    for chunk in sub_batches:
         out.extend(await _openai_embed(chunk, cfg))
         done += 1
         if on_batch is not None:

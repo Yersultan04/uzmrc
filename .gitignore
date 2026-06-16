@@ -11,6 +11,11 @@
 
 # ─── Транзиентные рабочие артефакты ───
 corpus/corpus_unique/
+# ingest/reindex bookkeeping — локальное состояние прогона, не для репо
+.ingest_state
+.ragid.new
+.oldrag_files.txt
+.upload_paths.txt
 
 # ─── Python ───
 __pycache__/
