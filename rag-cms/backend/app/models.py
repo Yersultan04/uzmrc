@@ -200,6 +200,26 @@ class Chunk(Base):
     )
 
 
+class EmbeddingCache(Base):
+    """Content-addressed cache of document embeddings.
+
+    Keyed by sha256(model_sig | text) so re-indexing the same corpus with the
+    same embedder is a pure cache hit — zero provider calls, no quota burn.
+    Cleared by changing the embedder (different model_sig → different hash).
+    """
+
+    __tablename__ = "embedding_cache"
+
+    hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # provider:model:dim — identity of the embedding space these vectors live in.
+    model_sig: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    dim: Mapped[int] = mapped_column(Integer, nullable=False)
+    vector: Mapped[list] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class IngestRun(Base):
     __tablename__ = "ingest_runs"
 

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clients import bm25 as bm25_client
 from app.clients import qdrant as qdrant_client
-from app.clients.embeddings import embed_documents_batched
+from app.ingestion.embed_cache import embed_with_cache
 from app.config import get_settings
 from app.db import SessionLocal
 from app.ingestion.chunker import chunk_pages
@@ -242,7 +242,8 @@ async def _process_file(
             {"file_id": str(file_obj.id), "done": done, "total": total},
         )
 
-    vectors = await embed_documents_batched(
+    vectors = await embed_with_cache(
+        db,
         embed_inputs,
         batch_size=64,
         on_batch=_on_batch,

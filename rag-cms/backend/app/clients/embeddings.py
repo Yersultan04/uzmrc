@@ -204,3 +204,13 @@ def effective_dim(rag_models: dict | None = None) -> int:
 def effective_model_name(rag_models: dict | None = None) -> str:
     cfg = _resolve_cfg(rag_models)
     return cfg.get("model") or "unknown"
+
+
+def model_signature(rag_models: dict | None = None) -> str:
+    """Stable identity of the embedding space — `provider:model:dim`.
+
+    Used as the namespace for the embedding cache: a different embedder yields a
+    different signature, so cached vectors never bleed across embedding spaces.
+    """
+    cfg = _resolve_cfg(rag_models)
+    return f"{cfg['provider']}:{cfg.get('model') or 'unknown'}:{effective_dim(rag_models)}"
