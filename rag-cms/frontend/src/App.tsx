@@ -1,4 +1,5 @@
 import {
+  Info,
   LayoutDashboard,
   LogOut,
   Moon,
@@ -93,6 +94,9 @@ export default function App() {
         <nav>
           <NavLink to="/" end className={navClass} title="RAG'и">
             <LayoutDashboard size={18} /> <span className="nav-label">RAG'и</span>
+          </NavLink>
+          <NavLink to="/about" className={navClass} title="О системе">
+            <Info size={18} /> <span className="nav-label">О системе</span>
           </NavLink>
           {session.user.role === 'admin' && (
             <NavLink to="/admin/users" className={navClass} title="Пользователи">

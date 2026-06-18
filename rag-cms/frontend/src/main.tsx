@@ -11,6 +11,7 @@ import RagDetail from './pages/RagDetail';
 import RagChat from './pages/RagChat';
 import RagCompare from './pages/RagCompare';
 import AdminUsers from './pages/AdminUsers';
+import AboutSystem from './pages/AboutSystem';
 import RequireAuth from './RequireAuth';
 import './styles.css';
 
@@ -53,6 +54,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                   element={
                     <RequireAuth>
                       <RagCompare />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="about"
+                  element={
+                    <RequireAuth>
+                      <AboutSystem />
                     </RequireAuth>
                   }
                 />

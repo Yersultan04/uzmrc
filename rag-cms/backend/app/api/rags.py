@@ -4,16 +4,16 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import current_user, get_owned_rag, role_in_rag
+from app.auth import current_user, get_accessible_rag, get_owned_rag, role_in_rag
 from app.clients import qdrant as qdrant_client
 from app.config import get_settings
 from app.db import get_db
-from app.models import MembershipStatus, Rag, RagMember, RagStatus, User, UserRole
+from app.models import Chunk, File, MembershipStatus, Rag, RagMember, RagStatus, User, UserRole
 from app.presets import get_preset, list_presets, snapshot_from_env, snapshot_from_preset
-from app.schemas import MemberInvite, MemberOut, RagCreate, RagOut
+from app.schemas import MemberInvite, MemberOut, RagCreate, RagOut, RagStatsOut
 
 router = APIRouter()
 
@@ -123,6 +123,63 @@ async def update_rag_settings(
     await db.commit()
     await db.refresh(rag)
     return await _decorate(db, rag, user)
+
+
+@router.get("/{rag_id}/stats", response_model=RagStatsOut)
+async def get_rag_stats(
+    rag: Rag = Depends(get_accessible_rag),
+    db: AsyncSession = Depends(get_db),
+) -> RagStatsOut:
+    """Live corpus statistics — number of documents, chunks, pages, tokens, etc.
+    Used by the public «О системе» panel. Accessible to owner, admin, and active members."""
+
+    # Single aggregate query over files for this RAG
+    files_agg = (
+        await db.execute(
+            select(
+                func.count(File.id).label("doc_count"),
+                func.coalesce(func.sum(File.pages), 0).label("pages_total"),
+            ).where(File.rag_id == rag.id)
+        )
+    ).one()
+
+    # Per-status breakdown in one query
+    status_rows = (
+        await db.execute(
+            select(File.status, func.count(File.id).label("cnt"))
+            .where(File.rag_id == rag.id)
+            .group_by(File.status)
+        )
+    ).all()
+    by_file_status: dict[str, int] = {row.status.value: row.cnt for row in status_rows}
+
+    # Chunk aggregate — count + sum of token_count
+    chunks_agg = (
+        await db.execute(
+            select(
+                func.count(Chunk.id).label("chunk_count"),
+                func.coalesce(func.sum(Chunk.token_count), 0).label("total_tokens"),
+            ).where(Chunk.rag_id == rag.id)
+        )
+    ).one()
+
+    doc_count: int = files_agg.doc_count
+    chunk_count: int = chunks_agg.chunk_count
+    avg_chunks = round(chunk_count / doc_count, 2) if doc_count > 0 else 0.0
+
+    return RagStatsOut(
+        rag_id=rag.id,
+        rag_name=rag.name,
+        status=rag.status,
+        embed_model=rag.embed_model,
+        embed_dim=rag.embed_dim,
+        documents=doc_count,
+        chunks=chunk_count,
+        pages_total=int(files_agg.pages_total),
+        avg_chunks_per_doc=avg_chunks,
+        total_tokens=int(chunks_agg.total_tokens),
+        by_file_status=by_file_status,
+    )
 
 
 @router.delete("/{rag_id}", status_code=204)

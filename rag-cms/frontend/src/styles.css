@@ -1331,3 +1331,8 @@ select option { background: var(--surface); color: var(--text); }
   .ticker .meta { flex-wrap: wrap; }
   .table th, .table td { padding: 10px 8px; }
 }
+
+/* About / О системе — списки возможностей */
+.feature-list { margin: 0; padding-left: 18px; }
+.feature-list li { margin: 6px 0; line-height: 1.45; }
+.feature-list li b { color: var(--text, inherit); }

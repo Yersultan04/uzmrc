@@ -174,3 +174,19 @@ class CompareRunOut(BaseModel):
     error: str | None = None
     created_at: datetime
     finished_at: datetime | None = None
+
+
+class RagStatsOut(BaseModel):
+    """Live corpus statistics for the public «О системе» panel."""
+
+    rag_id: uuid.UUID
+    rag_name: str
+    status: RagStatus
+    embed_model: str
+    embed_dim: int
+    documents: int
+    chunks: int
+    pages_total: int
+    avg_chunks_per_doc: float
+    total_tokens: int
+    by_file_status: dict[str, int] = Field(default_factory=dict)

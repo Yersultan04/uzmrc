@@ -228,6 +228,7 @@ export const api = {
   ) =>
     request<Rag>('POST', '/rags', { name, description, fts_language, preset }),
   getRag: (id: string) => request<Rag>('GET', `/rags/${id}`),
+  getRagStats: (id: string) => request<RagStats>('GET', `/rags/${id}/stats`),
   deleteRag: (id: string) => request<void>('DELETE', `/rags/${id}`),
   updateRagSettings: (id: string, patch: Record<string, unknown>) =>
     request<Rag>('PATCH', `/rags/${id}/settings`, patch),
@@ -484,4 +485,19 @@ export interface AgentEvent {
   ts: string;
   type: string;
   payload: Record<string, unknown>;
+}
+
+// --- О системе / База знаний ---
+export interface RagStats {
+  rag_id: string;
+  rag_name: string;
+  status: RagStatus;
+  embed_model: string;
+  embed_dim: number;
+  documents: number;
+  chunks: number;
+  pages_total: number;
+  avg_chunks_per_doc: number;
+  total_tokens: number;
+  by_file_status: Record<string, number>;
 }
