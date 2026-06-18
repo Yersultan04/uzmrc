@@ -51,9 +51,10 @@ def _get_client(base_url: str, api_key: str) -> AsyncOpenAI:
     if c is None:
         # 90s per request — slow providers (or reasoning models with huge max_tokens)
         # would otherwise hang for 10 min (SDK default).
-        # max_retries=6: free-tier LLMs (e.g. Gemini Flash-Lite, 15 RPM) return 429
-        # under bursty per-clause workloads; the SDK honours Retry-After and backs off.
-        c = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=90.0, max_retries=6)
+        # max_retries=2: Cerebras returns 429 with Retry-After=59s, so each retry adds
+        # ~1 min. 6 retries could stall a single step for ~5 min; 2 caps worst-case at
+        # ~2 min while still riding out a transient burst.
+        c = AsyncOpenAI(api_key=api_key, base_url=base_url, timeout=90.0, max_retries=2)
         _client_cache[key] = c
     return c
 
@@ -86,6 +87,7 @@ async def chat(
     base_url: str | None = None,
     api_key: str | None = None,
     provider_order: list[str] | tuple[str, ...] | None = None,
+    reasoning_effort: str | None = None,
 ) -> str:
     """Send a chat completion request.
 
@@ -124,10 +126,15 @@ async def chat(
         kwargs["response_format"] = response_format
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
+    extra_body: dict = {}
     # OpenRouter sub-provider pinning. Harmless on direct hosts (they ignore it).
     if provider_order:
-        kwargs["extra_body"] = {
-            "provider": {"order": list(provider_order), "allow_fallbacks": True}
-        }
+        extra_body["provider"] = {"order": list(provider_order), "allow_fallbacks": True}
+    # gpt-oss reasoning budget: "low" cuts the reasoning-token burn (→ faster, cheaper
+    # per step). Sent in the body; providers that don't support it ignore the field.
+    if reasoning_effort:
+        extra_body["reasoning_effort"] = reasoning_effort
+    if extra_body:
+        kwargs["extra_body"] = extra_body
     resp = await client.chat.completions.create(**kwargs)
     return resp.choices[0].message.content or ""

@@ -58,18 +58,38 @@ class GroundingReport:
 
 
 _SUBSTRING_MIN_LEN = 16  # treat very short quotes as too weak to be authoritative
+_FRAGMENT_MIN_LEN = 10   # ignore tiny stitched fragments (connectives, page nums)
 _FUZZY_THRESHOLD = 0.78
+# Models often stitch several non-contiguous spans of a norm into one quote with
+# ellipses ("…" / "...") or newlines. Ground each span independently, otherwise a
+# perfectly valid multi-span quote never matches as one contiguous substring and
+# collapses confidence to 0. Split on ellipses and line breaks.
+_FRAGMENT_SPLIT = re.compile(r"\s*(?:\.{3,}|…|…|\n)\s*")
 
 
-def _best_substring_ratio(needle: str, haystack: str) -> float:
-    """Sliding ratio between needle and best matching haystack window."""
+def _coverage_ratio(needle: str, haystack: str) -> float:
+    """How much of `needle` appears contiguously inside `haystack`, in [0, 1].
+
+    Uses the longest matching block rather than SequenceMatcher.ratio() — the latter
+    divides by the COMBINED length, so a fully-contained short quote scores low when
+    the chunk is much longer than the quote. Coverage is independent of chunk length.
+    """
     n = len(needle)
     if n == 0 or len(haystack) == 0:
         return 0.0
-    if n >= len(haystack):
-        return SequenceMatcher(None, needle, haystack).ratio()
-    # Use SequenceMatcher.get_matching_blocks heuristic via a single ratio call.
-    return SequenceMatcher(None, needle, haystack, autojunk=False).ratio()
+    match = SequenceMatcher(None, needle, haystack, autojunk=False).find_longest_match(
+        0, n, 0, len(haystack)
+    )
+    return match.size / n
+
+
+def _score_span(span_norm: str, span_loose: str, t_norm: str, t_loose: str) -> tuple[float, str]:
+    """Best grounding score for a single span against a chunk. Returns (score, method)."""
+    if len(span_norm) >= _SUBSTRING_MIN_LEN and span_norm in t_norm:
+        return 1.0, "substring"
+    if len(span_loose) >= _SUBSTRING_MIN_LEN and span_loose in t_loose:
+        return 0.95, "substring"
+    return _coverage_ratio(span_norm, t_norm), "fuzzy"
 
 
 def check_citation(citation: Citation, pool_by_id: dict[uuid.UUID, PoolEntry]) -> CitationCheck:
@@ -82,18 +102,38 @@ def check_citation(citation: Citation, pool_by_id: dict[uuid.UUID, PoolEntry]) -
 
     q_norm = _norm(quote)
     t_norm = _norm(chunk.text)
+    # Fast path: the whole quote is one contiguous span of the chunk.
     if len(q_norm) >= _SUBSTRING_MIN_LEN and q_norm in t_norm:
         return CitationCheck(citation, True, "substring", 1.0, "exact substring match")
-
-    q_loose = _norm_loose(quote)
     t_loose = _norm_loose(chunk.text)
+    q_loose = _norm_loose(quote)
     if len(q_loose) >= _SUBSTRING_MIN_LEN and q_loose in t_loose:
         return CitationCheck(citation, True, "substring", 0.95, "match after punctuation strip")
 
-    ratio = _best_substring_ratio(q_norm, t_norm)
-    if ratio >= _FUZZY_THRESHOLD:
-        return CitationCheck(citation, True, "fuzzy", ratio, f"fuzzy ratio={ratio:.2f}")
-    return CitationCheck(citation, False, "none", ratio, f"no support (best ratio={ratio:.2f})")
+    # Split stitched quotes ("span A … span B") and ground each span independently,
+    # then take a length-weighted mean so one valid multi-span quote still grounds.
+    spans = [s for s in _FRAGMENT_SPLIT.split(quote) if len(_norm(s)) >= _FRAGMENT_MIN_LEN]
+    if not spans:
+        spans = [quote]
+    total_w = 0.0
+    weighted = 0.0
+    best_method = "fuzzy"
+    for sp in spans:
+        sn = _norm(sp)
+        sl = _norm_loose(sp)
+        score, method = _score_span(sn, sl, t_norm, t_loose)
+        w = max(1, len(sn))
+        weighted += score * w
+        total_w += w
+        if method == "substring":
+            best_method = "substring"
+    agg = weighted / total_w if total_w else 0.0
+    if agg >= _FUZZY_THRESHOLD:
+        method = best_method if len(spans) == 1 else "fuzzy"
+        return CitationCheck(citation, True, method, agg,
+                             f"grounded across {len(spans)} span(s), score={agg:.2f}")
+    return CitationCheck(citation, False, "none", agg,
+                         f"no support ({len(spans)} span(s), best score={agg:.2f})")
 
 
 def ground_citations(

@@ -32,7 +32,8 @@ from app.presets import resolve_models_for_rag
 
 log = logging.getLogger("agent")
 
-DEFAULT_MAX_STEPS = 40
+DEFAULT_MAX_STEPS = 14  # 50-doc corpus rarely needs >5 steps; cap worst-case latency
+                        # (was 40 — let runs wander into 2-3 min before budget_exhausted)
 HISTORY_KEEP_RECENT = 6
 POOL_PROMPT_CAP = 12  # how many pool entries shown in the prompt at once
 POOL_TEXT_CAP_CHARS = 700  # truncate each entry's text in the prompt
@@ -268,13 +269,14 @@ async def _call_llm_for_step(
                 model=llm_model,
                 temperature=0.1,
                 response_format={"type": "json_object"},
-                max_tokens=30000,  # reasoning-models burn N tokens in `reasoning` before `content`;
-                                   # 30k pushes close to Cerebras' 32768 hard cap with ~2.7k headroom
-                                   # for safety; gives the model plenty of room for thought + 1200-word
-                                   # answer + citations.
+                max_tokens=10000,  # with reasoning_effort="low" the model burns far fewer
+                                   # reasoning tokens; 10k fits low-reasoning + a long answer
+                                   # and cuts TPM pressure (fewer 429s) vs the old 30k reserve.
                 base_url=base_url,
                 api_key=api_key,
                 provider_order=provider_order,
+                reasoning_effort="low",  # small corpus → low reasoning is enough and
+                                         # much faster per step; grounding pass guards quality
             )
             return _parse_step(raw)
         except (ValueError, ValidationError) as e:
