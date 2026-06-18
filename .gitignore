@@ -65,3 +65,8 @@ Thumbs.db
 # DB backups — contain data, never commit
 rag-cms/backups/
 *.sql.gz
+.deploy/
+.reingest.json
+reingest_pdf.py
+rerun_two.py
+rerun7.py
