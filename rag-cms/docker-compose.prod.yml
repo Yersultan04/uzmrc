@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: ragcms-postgres
     restart: unless-stopped
     environment:
@@ -22,27 +22,6 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
-
-  qdrant:
-    # 1.13+ for native sparse vector support, 1.17+ for weighted RRF (rrf weights).
-    # We still do weighted score blending client-side (Qdrant fusion is rank-based),
-    # but the version bump gives us native sparse storage + prefetch API.
-    image: qdrant/qdrant:v1.17.0
-    container_name: ragcms-qdrant
-    restart: unless-stopped
-    volumes:
-      - qdrant_data:/qdrant/storage
-    environment:
-      QDRANT__SERVICE__GRPC_PORT: 6334
-    ports:
-      # HTTP REST (Qdrant dashboard / API).
-      - "${QDRANT_BIND:-127.0.0.1}:${QDRANT_HTTP_PORT:-6333}:6333"
-      # gRPC.
-      - "${QDRANT_BIND:-127.0.0.1}:${QDRANT_GRPC_PORT:-6334}:6334"
-    deploy:
-      resources:
-        limits:
           memory: 512M
 
   backend:
@@ -56,7 +35,6 @@ services:
       - "${BACKEND_BIND:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      QDRANT_URL: http://qdrant:6333
       DATA_DIR: /data
       CORS_ORIGINS: ${CORS_ORIGINS:-https://rag-cms.eskender.tech}
       MAX_UPLOAD_MB: "200"
@@ -96,8 +74,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      qdrant:
-        condition: service_started
     deploy:
       resources:
         limits:
@@ -123,5 +99,4 @@ services:
 
 volumes:
   postgres_data:
-  qdrant_data:
   rag_data:

@@ -28,7 +28,7 @@ async def start_ingestion(
     db: AsyncSession = Depends(get_db),
     force: bool = Query(
         False,
-        description="When true, all parsed files are also re-processed (chunks + qdrant points are wiped first).",
+        description="When true, all parsed files are also re-processed (chunks are wiped and re-embedded first).",
     ),
 ) -> IngestRun:
     active = (

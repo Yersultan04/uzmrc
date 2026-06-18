@@ -2,6 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
@@ -197,6 +198,9 @@ class Chunk(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
     qdrant_point_id: Mapped[str | None] = mapped_column(String(64))
+    # pgvector dense embedding — nullable so old rows survive until re-indexed.
+    # Vector() without a fixed dimension accepts both 1024 (Voyage) and 3072 (Gemini).
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(), nullable=True)
     extra: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

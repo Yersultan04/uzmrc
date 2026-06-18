@@ -9,8 +9,6 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients import bm25 as bm25_client
-from app.clients import qdrant as qdrant_client
 from app.ingestion.embed_cache import embed_with_cache
 from app.config import get_settings
 from app.db import SessionLocal
@@ -65,25 +63,16 @@ async def _drop_existing_chunks(
     file_id: uuid.UUID,
 ) -> int:
     """Drop any existing chunks for a file — used on reindex (sha changed)
-    or before clean re-parse. Returns count dropped. Also clears Qdrant points."""
+    or before clean re-parse. Returns count dropped."""
+    from sqlalchemy import delete
+
     rows = (
         await db.execute(
-            select(Chunk.id, Chunk.qdrant_point_id).where(
-                Chunk.rag_id == rag_id, Chunk.file_id == file_id
-            )
+            select(Chunk.id).where(Chunk.rag_id == rag_id, Chunk.file_id == file_id)
         )
     ).all()
     if not rows:
         return 0
-    point_ids = [r[1] for r in rows if r[1]]
-    if point_ids:
-        try:
-            await qdrant_client.delete_points(rag_id, point_ids)
-        except Exception as e:
-            log.warning("failed to drop %d qdrant points for file %s: %s", len(point_ids), file_id, e)
-    # Drop chunk rows in one statement
-    from sqlalchemy import delete
-
     await db.execute(delete(Chunk).where(Chunk.rag_id == rag_id, Chunk.file_id == file_id))
     await db.flush()
     return len(rows)
@@ -250,18 +239,8 @@ async def _process_file(
         rag_models=rag_models,
     )
 
-    # Generate sparse BM25 vectors in parallel — fastembed runs in-process,
-    # CPU-only, fast. Language picked from rag.settings.fts_language.
-    fts_lang = (rag.settings or {}).get("fts_language", "english")
-    # For the sparse vector we want to match query intent, so embed the *chunk
-    # text* (not the contextual prefix or description) — sparse models do best
-    # on the actual content tokens.
-    sparse_inputs = [c.text for c in chunks]
-    sparse_vectors = bm25_client.embed_documents(sparse_inputs, language=fts_lang)
-
-    points: list[tuple[str, list[float], dict, dict]] = []
     chunk_rows: list[Chunk] = []
-    for i, (c, vec, sparse_vec) in enumerate(zip(chunks, vectors, sparse_vectors, strict=True)):
+    for i, (c, vec) in enumerate(zip(chunks, vectors, strict=True)):
         chunk_id = uuid.uuid4()
         extra: dict = {}
         if contexts and i < len(contexts) and contexts[i]:
@@ -287,26 +266,10 @@ async def _process_file(
             heading=c.heading,
             text=c.text,
             token_count=c.token_count,
-            qdrant_point_id=str(chunk_id),
+            embedding=vec,
             extra=extra,
         )
         chunk_rows.append(row)
-        points.append(
-            (
-                str(chunk_id),
-                vec,
-                sparse_vec,
-                {
-                    "chunk_id": str(chunk_id),
-                    "rag_id": str(rag.id),
-                    "file_id": str(file_obj.id),
-                    "filename": file_obj.filename,
-                    "page_start": c.page_start,
-                    "page_end": c.page_end,
-                    "heading": c.heading,
-                },
-            )
-        )
 
     run.current_stage = "storing"
     await db.commit()
@@ -314,7 +277,6 @@ async def _process_file(
 
     db.add_all(chunk_rows)
     await db.flush()
-    await qdrant_client.upsert_chunks(rag.id, points)
 
     file_obj.status = FileStatus.parsed
     file_obj.error = None
@@ -351,8 +313,6 @@ async def run_ingestion(rag_id: uuid.UUID, ingest_run_id: uuid.UUID) -> None:
         run.started_at = datetime.now(timezone.utc)
         rag.status = RagStatus.indexing
         await db.commit()
-
-        await qdrant_client.ensure_collection(rag.id, rag.embed_dim)
 
         # Caching: only process files that haven't been successfully parsed yet.
         files_q = await db.execute(

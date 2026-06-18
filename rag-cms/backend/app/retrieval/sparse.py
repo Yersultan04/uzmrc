@@ -1,20 +1,34 @@
-"""Sparse retrieval via Qdrant BM25 sparse vectors (fastembed Qdrant/bm25).
+"""Sparse retrieval via Postgres full-text search (ts_rank_cd).
 
-Replaced the Postgres FTS implementation — sparse now lives in Qdrant
-alongside dense for native hybrid querying. Per-RAG language picked from
-`rag.settings.fts_language` (the same knob users already set at create time).
+Replaces the former Qdrant BM25/fastembed implementation.  Language is picked
+from ``rag.settings.fts_language``; unknown configs fall back to ``simple``
+so the query never errors even for unsupported language names.
 """
 from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clients import bm25 as bm25_client
-from app.clients import qdrant as qdrant_client
 from app.models import Rag
+
+# Postgres text-search configurations we trust.  Anything outside this set
+# falls back to 'simple' (language-agnostic stemming).
+_ALLOWED_TS_CONFIGS = frozenset(
+    {"simple", "english", "russian", "german", "french", "spanish",
+     "italian", "portuguese", "dutch", "danish", "swedish", "norwegian",
+     "finnish", "turkish", "arabic", "romanian", "hungarian", "greek"}
+)
+
+
+def _safe_ts_config(lang: str | None) -> str:
+    """Return a validated Postgres ts_config name, defaulting to 'simple'."""
+    if not lang:
+        return "simple"
+    s = lang.strip().lower()
+    return s if s in _ALLOWED_TS_CONFIGS else "simple"
 
 
 @dataclass
@@ -31,18 +45,35 @@ async def sparse_search(
     *,
     language: str | None = None,
 ) -> list[SparseHit]:
+    """FTS sparse leg using ``plainto_tsquery`` + ``ts_rank_cd``."""
     if not query.strip():
         return []
+
     if not language:
         rag = (await db.execute(select(Rag).where(Rag.id == rag_id))).scalar_one_or_none()
         language = (rag.settings or {}).get("fts_language") if rag is not None else None
-    sparse_q = bm25_client.embed_query(query, language=language or "english")
-    hits = await qdrant_client.search_sparse(rag_id, sparse_q, top_k=top_k)
-    out: list[SparseHit] = []
-    for h in hits:
-        try:
-            cid = uuid.UUID(h.point_id)
-        except (ValueError, TypeError):
-            continue
-        out.append(SparseHit(chunk_id=cid, score=h.score))
-    return out
+
+    ts_config = _safe_ts_config(language)
+
+    # ts_rank_cd(tsvector, tsquery) returns a float in [0, 1].
+    # We search over coalesce(heading, '') || ' ' || text so headings are
+    # included in ranking but the chunk is still matched even without one.
+    stmt = text(
+        f"""
+        SELECT id,
+               ts_rank_cd(
+                   to_tsvector('{ts_config}',
+                               coalesce(heading, '') || ' ' || text),
+                   plainto_tsquery('{ts_config}', :q)
+               ) AS score
+        FROM   chunks
+        WHERE  rag_id = :rid
+          AND  to_tsvector('{ts_config}',
+                           coalesce(heading, '') || ' ' || text)
+               @@ plainto_tsquery('{ts_config}', :q)
+        ORDER  BY score DESC
+        LIMIT  :k
+        """
+    )
+    rows = (await db.execute(stmt, {"q": query, "rid": str(rag_id), "k": top_k})).all()
+    return [SparseHit(chunk_id=uuid.UUID(str(r.id)), score=float(r.score)) for r in rows]

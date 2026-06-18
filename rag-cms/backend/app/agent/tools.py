@@ -10,10 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.schemas import PoolEntry
-from app.clients import qdrant as qdrant_client
 from app.clients.llm import chat
 from app.clients.embeddings import embed_query
-from app.config import get_settings
 from app.models import Chunk, File
 from app.retrieval.dense import dense_search as do_dense
 from app.retrieval.hybrid import hybrid_search
@@ -221,23 +219,20 @@ async def hyde_search_tool(ctx: AgentContext, args: dict) -> ToolResult:
         api_key=ctx.rag_models.get("llm_api_key"),
         provider_order=ctx.rag_models.get("llm_provider_order"),
     )
-    vec = await embed_query(
-        passage if passage.strip() else query,
+    hyde_query = passage if passage.strip() else query
+    dense_hits = await do_dense(
+        ctx.db,
+        ctx.rag_id,
+        hyde_query,
+        top_k,
         rag_models=ctx.rag_models,
     )
-    qhits = await qdrant_client.search_dense(ctx.rag_id, vec, top_k=top_k)
-    chunk_ids: list[uuid.UUID] = []
-    score_by_id: dict[uuid.UUID, float] = {}
-    for h in qhits:
-        cid = (h.payload or {}).get("chunk_id") or h.point_id
-        try:
-            u = uuid.UUID(cid)
-            chunk_ids.append(u)
-            score_by_id[u] = h.score
-        except (ValueError, TypeError):
-            continue
-    if not chunk_ids:
+    if not dense_hits:
         return ToolResult(summary="hyde_search: 0 hits", data={"hyde": passage})
+
+    chunk_ids = [h.chunk_id for h in dense_hits]
+    score_by_id = {h.chunk_id: h.score for h in dense_hits}
+
     res = await ctx.db.execute(
         select(Chunk).where(Chunk.id.in_(chunk_ids))
     )

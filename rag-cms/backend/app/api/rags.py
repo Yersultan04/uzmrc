@@ -8,7 +8,6 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import current_user, get_accessible_rag, get_owned_rag, role_in_rag
-from app.clients import qdrant as qdrant_client
 from app.config import get_settings
 from app.db import get_db
 from app.models import Chunk, File, MembershipStatus, Rag, RagMember, RagStatus, User, UserRole
@@ -40,7 +39,9 @@ async def create_rag(
 ) -> RagOut:
     s = get_settings()
     rag_id = uuid.uuid4()
-    collection = qdrant_client.collection_name(rag_id)
+    # qdrant_collection kept for DB schema compatibility — value is a stable slug
+    # derived from the RAG id; no Qdrant collection is created.
+    collection = f"rag_{str(rag_id).replace('-', '')}"
     fts_language = (payload.fts_language or s.default_fts_language).strip().lower() or "simple"
 
     if payload.preset:
@@ -65,7 +66,6 @@ async def create_rag(
     await db.commit()
     await db.refresh(rag)
 
-    await qdrant_client.ensure_collection(rag.id, rag.embed_dim)
     (s.data_dir / "rags" / str(rag.id) / "files").mkdir(parents=True, exist_ok=True)
     return await _decorate(db, rag, user)
 
@@ -186,7 +186,6 @@ async def get_rag_stats(
 async def delete_rag(
     rag: Rag = Depends(get_owned_rag), db: AsyncSession = Depends(get_db)
 ) -> None:
-    await qdrant_client.delete_collection(rag.id)
     await db.delete(rag)
     await db.commit()
 

@@ -3,8 +3,10 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.clients.embeddings import embed_query
-from app.clients.qdrant import search_dense
 
 
 @dataclass
@@ -14,20 +16,45 @@ class DenseHit:
 
 
 async def dense_search(
+    db: AsyncSession,
     rag_id: uuid.UUID,
     query: str,
     top_k: int,
     *,
     rag_models: dict | None = None,
+    query_vector: list[float] | None = None,
 ) -> list[DenseHit]:
-    vec = await embed_query(query, rag_models=rag_models)
-    qhits = await search_dense(rag_id, vec, top_k=top_k)
-    out: list[DenseHit] = []
-    for h in qhits:
-        cid_str = (h.payload or {}).get("chunk_id") or h.point_id
-        try:
-            cid = uuid.UUID(cid_str)
-        except (ValueError, TypeError):
-            continue
-        out.append(DenseHit(chunk_id=cid, score=h.score))
-    return out
+    """Dense retrieval via pgvector cosine similarity.
+
+    Uses a brute-force scan (no ANN index) — correct for small corpora that
+    fit in RAM.  The cast ``::vector`` is safe because we build the literal
+    from a Python list of floats, not from user input.
+    """
+    vec = query_vector if query_vector is not None else await embed_query(
+        query, rag_models=rag_models
+    )
+
+    # Build the Postgres vector literal from a Python list.  We use a bound
+    # parameter for the rag_id (UUID) and construct the vector literal inline
+    # (no SQL injection risk — values are float, not user-supplied strings).
+    vec_literal = "[" + ",".join(str(float(v)) for v in vec) + "]"
+
+    stmt = text(
+        """
+        SELECT id,
+               1 - (embedding <=> CAST(:qvec AS vector)) AS score
+        FROM   chunks
+        WHERE  rag_id = :rid
+          AND  embedding IS NOT NULL
+        ORDER  BY embedding <=> CAST(:qvec AS vector)
+        LIMIT  :k
+        """
+    )
+    rows = (
+        await db.execute(
+            stmt,
+            {"qvec": vec_literal, "rid": str(rag_id), "k": top_k},
+        )
+    ).all()
+
+    return [DenseHit(chunk_id=uuid.UUID(str(r.id)), score=float(r.score)) for r in rows]

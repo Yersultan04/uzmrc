@@ -1,10 +1,10 @@
-"""Hybrid retrieval: dense (Qdrant cosine) + sparse (Qdrant BM25) with
+"""Hybrid retrieval: pgvector dense + Postgres FTS sparse with
 client-side WEIGHTED score blend.
 
 The blend uses min-max normalization within each leg's result set so the
 weights (0.8 dense / 0.2 sparse by default) actually behave proportionally —
-without normalization, sparse dot-product scores (5-30) would dominate dense
-cosine scores (0-1) regardless of weight.
+without normalization, FTS ts_rank_cd scores (0-1 float) could be swamped by
+dense cosine scores in edge cases.
 """
 from __future__ import annotations
 
@@ -16,12 +16,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.clients import bm25 as bm25_client
-from app.clients import qdrant as qdrant_client
 from app.clients.embeddings import embed_query
 from app.config import get_settings
 from app.models import Chunk, Rag
 from app.presets import resolve_models_for_rag
+from app.retrieval.dense import DenseHit, dense_search
+from app.retrieval.sparse import SparseHit, sparse_search
 
 
 @dataclass
@@ -33,7 +33,7 @@ class FusedHit:
 
 
 def _minmax(scores: list[float]) -> list[float]:
-    """Return min-max normalized copy of `scores` (output in [0, 1]).
+    """Return min-max normalized copy of ``scores`` (output in [0, 1]).
     Empty / single-element list passes through unchanged."""
     if not scores:
         return []
@@ -44,8 +44,8 @@ def _minmax(scores: list[float]) -> list[float]:
 
 
 def weighted_blend(
-    dense_hits: list[qdrant_client.QdrantHit],
-    sparse_hits: list[qdrant_client.QdrantHit],
+    dense_hits: list[DenseHit],
+    sparse_hits: list[SparseHit],
     *,
     w_dense: float = 0.8,
     w_sparse: float = 0.2,
@@ -54,26 +54,25 @@ def weighted_blend(
     d_norm = _minmax([h.score for h in dense_hits])
     s_norm = _minmax([h.score for h in sparse_hits])
 
-    table: dict[str, dict] = {}
+    table: dict[uuid.UUID, dict] = {}
     for h, n in zip(dense_hits, d_norm, strict=True):
-        table.setdefault(h.point_id, {"score": 0.0, "dense": None, "sparse": None})
-        table[h.point_id]["dense"] = h.score
-        table[h.point_id]["score"] += w_dense * n
+        table.setdefault(h.chunk_id, {"score": 0.0, "dense": None, "sparse": None})
+        table[h.chunk_id]["dense"] = h.score
+        table[h.chunk_id]["score"] += w_dense * n
     for h, n in zip(sparse_hits, s_norm, strict=True):
-        table.setdefault(h.point_id, {"score": 0.0, "dense": None, "sparse": None})
-        table[h.point_id]["sparse"] = h.score
-        table[h.point_id]["score"] += w_sparse * n
+        table.setdefault(h.chunk_id, {"score": 0.0, "dense": None, "sparse": None})
+        table[h.chunk_id]["sparse"] = h.score
+        table[h.chunk_id]["score"] += w_sparse * n
 
-    out: list[FusedHit] = []
-    for pid, v in table.items():
-        try:
-            cid = uuid.UUID(pid)
-        except (ValueError, TypeError):
-            continue
-        out.append(FusedHit(
-            chunk_id=cid, score=v["score"],
-            dense_score=v["dense"], sparse_score=v["sparse"],
-        ))
+    out: list[FusedHit] = [
+        FusedHit(
+            chunk_id=cid,
+            score=v["score"],
+            dense_score=v["dense"],
+            sparse_score=v["sparse"],
+        )
+        for cid, v in table.items()
+    ]
     out.sort(key=lambda h: h.score, reverse=True)
     return out
 
@@ -87,44 +86,53 @@ async def hybrid_search(
     *,
     query_vector: list[float] | None = None,
 ) -> list[tuple[Chunk, FusedHit]]:
-    """When `query_vector` is provided, the dense leg reuses it instead of
+    """When ``query_vector`` is provided the dense leg reuses it instead of
     calling the embedder — lets callers (e.g. compare) pre-embed many queries
     in one batched request and stay under embedder rate limits."""
     s = get_settings()
 
-    fts_lang: str = "english"
+    fts_lang: str = "simple"
     rag_models: dict | None = None
     rag_row = (await db.execute(select(Rag).where(Rag.id == rag_id))).scalar_one_or_none()
     if rag_row is not None:
-        fts_lang = (rag_row.settings or {}).get("fts_language") or "english"
+        fts_lang = (rag_row.settings or {}).get("fts_language") or "simple"
         rag_models = resolve_models_for_rag(rag_row)
 
-    async def _dense_leg() -> list[qdrant_client.QdrantHit]:
+    async def _dense_leg() -> list[DenseHit]:
         if mode not in ("dense", "hybrid"):
             return []
-        vec = query_vector if query_vector is not None else await embed_query(
-            query, rag_models=rag_models
+        return await dense_search(
+            db,
+            rag_id,
+            query,
+            top_k=s.retrieval_top_k_dense,
+            rag_models=rag_models,
+            query_vector=query_vector,
         )
-        return await qdrant_client.search_dense(rag_id, vec, top_k=s.retrieval_top_k_dense)
 
-    async def _sparse_leg() -> list[qdrant_client.QdrantHit]:
+    async def _sparse_leg() -> list[SparseHit]:
         if mode not in ("sparse", "hybrid"):
             return []
-        sparse_q = bm25_client.embed_query(query, language=fts_lang)
-        return await qdrant_client.search_sparse(rag_id, sparse_q, top_k=s.retrieval_top_k_sparse)
+        return await sparse_search(
+            db,
+            rag_id,
+            query,
+            top_k=s.retrieval_top_k_sparse,
+            language=fts_lang,
+        )
 
     dense_hits, sparse_hits = await asyncio.gather(_dense_leg(), _sparse_leg())
 
     if mode == "dense":
-        fused = [FusedHit(
-            chunk_id=uuid.UUID(h.point_id), score=h.score,
-            dense_score=h.score, sparse_score=None,
-        ) for h in dense_hits if _is_uuid(h.point_id)]
+        fused: list[FusedHit] = [
+            FusedHit(chunk_id=h.chunk_id, score=h.score, dense_score=h.score, sparse_score=None)
+            for h in dense_hits
+        ]
     elif mode == "sparse":
-        fused = [FusedHit(
-            chunk_id=uuid.UUID(h.point_id), score=h.score,
-            dense_score=None, sparse_score=h.score,
-        ) for h in sparse_hits if _is_uuid(h.point_id)]
+        fused = [
+            FusedHit(chunk_id=h.chunk_id, score=h.score, dense_score=None, sparse_score=h.score)
+            for h in sparse_hits
+        ]
     else:
         fused = weighted_blend(dense_hits, sparse_hits)
 
@@ -143,11 +151,3 @@ async def hybrid_search(
         if c is not None:
             out.append((c, f))
     return out
-
-
-def _is_uuid(s: str) -> bool:
-    try:
-        uuid.UUID(s)
-        return True
-    except (ValueError, TypeError):
-        return False

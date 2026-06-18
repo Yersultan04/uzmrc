@@ -18,9 +18,6 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://ragcms:ragcms@localhost:5432/ragcms"
 
-    qdrant_url: str = "http://localhost:6333"
-    qdrant_api_key: str | None = None
-
     data_dir: Path = Path("./data")
     max_upload_mb: int = 200
 

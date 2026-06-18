@@ -10,10 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_accessible_rag, get_owned_rag
-from app.clients import qdrant as qdrant_client
 from app.config import get_settings
 from app.db import get_db
-from app.models import Chunk
 from app.models import File as FileModel
 from app.models import FileStatus, Rag
 from app.schemas import FileOut
@@ -141,23 +139,7 @@ async def delete_file(
     if row is None:
         raise HTTPException(404, "file not found")
 
-    # Drop any Qdrant points belonging to this file BEFORE deleting the chunk rows
-    # (the file row's cascade nukes chunks, which is what tells us what to delete from Qdrant).
-    point_ids_rows = (
-        await db.execute(
-            select(Chunk.qdrant_point_id).where(
-                Chunk.rag_id == rag.id, Chunk.file_id == row.id
-            )
-        )
-    ).all()
-    point_ids = [r[0] for r in point_ids_rows if r[0]]
-    if point_ids:
-        try:
-            await qdrant_client.delete_points(rag.id, point_ids)
-        except Exception:
-            # Don't fail the delete request — orphan points are recoverable via a maintenance sweep later.
-            pass
-
+    # Chunk rows are deleted via CASCADE when the file row is deleted below.
     try:
         Path(row.storage_path).unlink(missing_ok=True)
     except OSError:

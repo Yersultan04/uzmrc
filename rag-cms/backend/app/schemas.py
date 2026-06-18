@@ -68,7 +68,7 @@ class RagOut(BaseModel):
     name: str
     description: str | None
     status: RagStatus
-    qdrant_collection: str
+    qdrant_collection: str | None = None  # kept for frontend compatibility; no longer used server-side
     embed_model: str
     embed_dim: int
     owner_id: uuid.UUID
