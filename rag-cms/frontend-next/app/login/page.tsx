@@ -103,13 +103,24 @@ function LoginForm() {
           style={{ background: "white" }}
         />
 
-        <div className="relative z-10">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/ipoteka-logo.png"
-            alt="UzMRC"
-            style={{ height: 44, width: "auto", filter: "brightness(0) invert(1)" }}
-          />
+        <div className="relative z-10 flex items-center gap-3">
+          <svg width="40" height="40" viewBox="0 0 32 32" fill="none" aria-label="UzMRC">
+            <rect width="32" height="32" rx="8" fill="rgba(255,255,255,0.16)" />
+            <path
+              d="M11 9v8.2c0 2.7 2.2 4.8 5 4.8s5-2.1 5-4.8V9"
+              stroke="#fff"
+              strokeWidth="2.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <circle cx="16" cy="9" r="1.6" fill="#fff" />
+          </svg>
+          <span
+            className="text-2xl font-bold tracking-tight"
+            style={{ color: "#fff" }}
+          >
+            UzMRC
+          </span>
         </div>
 
         <div className="relative z-10">
@@ -136,13 +147,15 @@ function LoginForm() {
       {/* Right form area */}
       <div className="flex-1 flex items-center justify-center px-6">
         <div className="w-full max-w-sm animate-fade-up">
-          <div className="lg:hidden text-center mb-8">
+          <div className="lg:hidden flex items-center justify-center gap-2.5 mb-8">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/ipoteka-logo.png"
-              alt="UzMRC"
-              style={{ height: 40, width: "auto", margin: "0 auto" }}
-            />
+            <img src="/uzmrc-mark.svg" alt="UzMRC" style={{ height: 34, width: 34 }} />
+            <span
+              className="text-xl font-bold tracking-tight"
+              style={{ color: "#127A41" }}
+            >
+              UzMRC
+            </span>
           </div>
 
           <div className="mb-7">

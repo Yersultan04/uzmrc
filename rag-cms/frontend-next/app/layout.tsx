@@ -9,7 +9,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 export const metadata: Metadata = {
   title: "UzMRC — Нормативный AI-ассистент",
   description: "RAG-ассистент по нормативной базе Узбекской ипотечной рефинансовой компании",
-  icons: { icon: "/ipoteka-icon.png" },
+  icons: { icon: "/uzmrc-mark.svg" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

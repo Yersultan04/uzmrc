@@ -70,3 +70,8 @@ rag-cms/backups/
 reingest_pdf.py
 rerun_two.py
 rerun7.py
+
+# демо-артефакты E2E
+smoke/e2e/
+smoke/test-prikaz.txt
+.tmp_prodpw

@@ -87,7 +87,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           className="flex h-16 items-center gap-2.5 border-b border-border px-5"
         >
           <Image
-            src="/ipoteka-icon.png"
+            src="/uzmrc-mark.svg"
             alt="UzMRC"
             width={28}
             height={28}
@@ -138,7 +138,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {/* Mobile brand + nav (compact) */}
           <Link href="/" className="flex items-center gap-2 md:hidden">
             <Image
-              src="/ipoteka-icon.png"
+              src="/uzmrc-mark.svg"
               alt="UzMRC"
               width={26}
               height={26}

@@ -279,7 +279,7 @@
 }
 .message-content .katex { font-size: 1em; }
 
-/* Ipoteka logo: slow start → full 360° clockwise → reverse back counter-clockwise */
+/* UzMRC logo: slow start → full 360° clockwise → reverse back counter-clockwise */
 @keyframes logo-pendulum {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
