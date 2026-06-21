@@ -88,9 +88,9 @@ export default function App() {
         className="sidebar"
         style={{ width: 64, minWidth: 64, maxWidth: 64, gridArea: 'sidebar' }}
       >
-        <div className="brand">
+        <NavLink to="/" end className="brand" title="На главную" style={{ cursor: 'pointer' }}>
           <BrandMark />
-        </div>
+        </NavLink>
         <nav>
           <NavLink to="/" end className={navClass} title="Базы знаний">
             <LayoutDashboard size={18} /> <span className="nav-label">Базы</span>
