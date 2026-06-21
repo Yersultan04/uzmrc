@@ -1,0 +1,20 @@
+# Override для изолированного запуска UzMRC-стека ПАРАЛЛЕЛЬНО с другим rag-cms.
+# Уникальные имена контейнеров + фиксированные непересекающиеся порты.
+# Запуск:
+#   docker compose -p uzmrc -f docker-compose.prod.yml -f docker-compose.uzmrc.yml up -d --build
+# Project name `uzmrc` изолирует volumes (uzmrc_postgres_data/uzmrc_rag_data) и сеть.
+services:
+  postgres:
+    container_name: uzmrc-postgres
+    ports:
+      - "127.0.0.1:5435:5432"
+
+  backend:
+    container_name: uzmrc-backend
+    ports:
+      - "127.0.0.1:8088:8000"
+
+  frontend:
+    container_name: uzmrc-frontend
+    ports:
+      - "127.0.0.1:8090:80"
