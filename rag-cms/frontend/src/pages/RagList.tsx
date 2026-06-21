@@ -100,14 +100,14 @@ export default function RagList() {
         <div className="hero-orb" />
         <div className="spread" style={{ position: 'relative' }}>
           <div>
-            <h1>{isAdmin ? 'Все RAG’и' : 'Ваши RAG’и'}</h1>
+            <h1>{isAdmin ? 'Все базы знаний' : 'Ваши базы знаний'}</h1>
             <p className="muted" style={{ margin: 0, fontSize: 13.5, maxWidth: 620, lineHeight: 1.55 }}>
-              Создавайте изолированные RAG-инстансы: каждый со своим Qdrant-collection,
-              файлами, агентом и API.
+              База знаний — это набор документов, по которому можно задавать вопросы
+              и проверять новые документы на противоречия.
             </p>
           </div>
           <button onClick={() => setCreateOpen(true)}>
-            <Plus size={16} /> Новый RAG
+            <Plus size={16} /> Новая база
           </button>
         </div>
       </div>
@@ -246,9 +246,9 @@ function CreateModal(p: CreateProps) {
     <div className="modal-backdrop" onClick={p.onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h2 style={{ margin: 0 }}>Новый RAG</h2>
+          <h2 style={{ margin: 0 }}>Новая база знаний</h2>
           <div className="subtle" style={{ marginTop: 4 }}>
-            Отдельный изолированный экземпляр: Qdrant-collection, файлы, агент.
+            Набор документов с поиском и проверкой на противоречия.
           </div>
         </div>
         <form onSubmit={p.onSubmit}>

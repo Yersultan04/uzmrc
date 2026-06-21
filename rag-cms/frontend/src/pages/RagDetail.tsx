@@ -319,6 +319,16 @@ export default function RagDetail() {
   const lang = (rag.settings as { fts_language?: string } | undefined)?.fts_language;
   const isIndexing = run?.status === 'running' || run?.status === 'queued';
 
+  // B1: почему чат/сравнение недоступны — явная причина вместо тихого disabled
+  const askBlockedReason: string | null = (() => {
+    if (canAsk === false) return 'Нет доступа к этой базе — запросите доступ у владельца.';
+    if (rag.status === 'ready') return null;
+    if (isIndexing) return 'База индексируется — чат и сравнение станут доступны после завершения.';
+    if (rag.status === 'failed') return 'Индексация не удалась — обратитесь к администратору.';
+    return 'База ещё не проиндексирована — запустите индексацию во вкладке «Файлы».';
+  })();
+  const askDisabled = askBlockedReason !== null;
+
   return (
     <div className="col" style={{ gap: 20 }}>
       <div className="hero-block">
@@ -345,13 +355,13 @@ export default function RagDetail() {
                 <Users size={14} /> Участники
               </button>
             )}
-            <Link to={`/rag/${rag.id}/compare`}>
-              <button className="ghost" disabled={rag.status !== 'ready' || canAsk === false}>
+            <Link to={`/rag/${rag.id}/compare`} style={askDisabled ? { pointerEvents: 'none' } : undefined}>
+              <button className="ghost" disabled={askDisabled} title={askBlockedReason ?? 'Сравнить документ с базой'}>
                 <GitCompare size={16} /> Сравнить документ
               </button>
             </Link>
-            <Link to={`/rag/${rag.id}/chat`}>
-              <button disabled={rag.status !== 'ready' || canAsk === false}>
+            <Link to={`/rag/${rag.id}/chat`} style={askDisabled ? { pointerEvents: 'none' } : undefined}>
+              <button disabled={askDisabled} title={askBlockedReason ?? 'Открыть чат с агентом'}>
                 <Bot size={16} /> Чат с агентом
               </button>
             </Link>
@@ -362,6 +372,20 @@ export default function RagDetail() {
             )}
           </div>
         </div>
+        {askDisabled && rag.status !== 'ready' && (
+          <div
+            className="row gap-8"
+            style={{
+              marginTop: 12, padding: '10px 14px',
+              background: 'var(--accent-soft, rgba(0,120,180,.08))', color: 'var(--muted)',
+              border: '1px solid var(--border)', borderRadius: 'var(--r-md)',
+              fontSize: 13, position: 'relative',
+            }}
+          >
+            {isIndexing ? <Loader2 size={14} className="spinner" /> : <Search size={14} />}
+            {askBlockedReason}
+          </div>
+        )}
         {role === 'member' && rag.member_status === 'revoked' && (
           <div
             className="row gap-8"
