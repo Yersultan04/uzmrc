@@ -177,9 +177,9 @@ function Breadcrumbs() {
   if (chatMatch) {
     return (
       <div className="crumbs">
-        <NavLink to="/" style={{ color: 'inherit' }}>Дашборд</NavLink>
+        <NavLink to="/" style={{ color: 'inherit' }}>Базы знаний</NavLink>
         {' / '}
-        <NavLink to={`/rag/${chatMatch.params.id}`} style={{ color: 'inherit' }}>RAG</NavLink>
+        <NavLink to={`/rag/${chatMatch.params.id}`} style={{ color: 'inherit' }}>База</NavLink>
         {' / Чат с агентом'}
       </div>
     );
@@ -187,8 +187,8 @@ function Breadcrumbs() {
   if (ragMatch) {
     return (
       <div className="crumbs">
-        <NavLink to="/" style={{ color: 'inherit' }}>Дашборд</NavLink>
-        {' / RAG'}
+        <NavLink to="/" style={{ color: 'inherit' }}>Базы знаний</NavLink>
+        {' / База'}
       </div>
     );
   }

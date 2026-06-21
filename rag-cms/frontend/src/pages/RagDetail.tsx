@@ -334,7 +334,7 @@ export default function RagDetail() {
       <div className="hero-block">
         <div className="hero-orb" />
         <Link to="/" className="row" style={{ color: 'var(--muted)', fontSize: 12.5, marginBottom: 8, position: 'relative' }}>
-          <ArrowLeft size={14} /> Все RAG'и
+          <ArrowLeft size={14} /> Все базы знаний
         </Link>
         <div className="spread" style={{ position: 'relative' }}>
           <div>

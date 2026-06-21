@@ -89,7 +89,7 @@ export default function AdminUsers() {
     } catch (e) { toast.error((e as Error).message); }
   }
   async function onDelete(u: AuthUser) {
-    if (!confirm(`Удалить ${u.email}? Все RAG'и пользователя будут удалены.`)) return;
+    if (!confirm(`Удалить ${u.email}? Все базы знаний пользователя будут удалены.`)) return;
     try {
       await api.deleteUser(u.id);
       toast.success(`${u.email} удалён`);
