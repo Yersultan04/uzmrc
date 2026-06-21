@@ -503,7 +503,12 @@ function FilePreviewModal({
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [mime, setMime] = useState<string>('');
+  const [textContent, setTextContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const isTextFile =
+    mime.startsWith('text/') ||
+    /\.(txt|md|markdown|json|csv|log|html?)$/i.test(filename);
 
   useEffect(() => {
     let cancelled = false;
@@ -518,6 +523,14 @@ function FilePreviewModal({
         urlToRevoke = url;
         setBlobUrl(url);
         setMime(mime);
+        // Текстовые файлы (наш корпус — PDF→txt и HTML→txt) показываем прямо в окне
+        const asText =
+          mime.startsWith('text/') ||
+          /\.(txt|md|markdown|json|csv|log|html?)$/i.test(filename);
+        if (asText) {
+          const txt = await (await fetch(url)).text();
+          if (!cancelled) setTextContent(txt);
+        }
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
       }
@@ -526,7 +539,7 @@ function FilePreviewModal({
       cancelled = true;
       if (urlToRevoke) URL.revokeObjectURL(urlToRevoke);
     };
-  }, [ragId, fileId]);
+  }, [ragId, fileId, filename]);
 
   // Escape to close
   useEffect(() => {
@@ -582,6 +595,22 @@ function FilePreviewModal({
               title={filename}
               style={{ width: '100%', height: '100%', border: 0 }}
             />
+          ) : isTextFile ? (
+            textContent === null ? (
+              <div className="row gap-8" style={{ padding: 24, color: 'var(--muted)' }}>
+                <Loader2 size={14} className="spinner" /> Загружаю текст…
+              </div>
+            ) : (
+              <pre
+                style={{
+                  margin: 0, padding: '18px 22px', height: '100%', overflow: 'auto',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  fontFamily: 'inherit', fontSize: 13.5, lineHeight: 1.6,
+                }}
+              >
+                {textContent}
+              </pre>
+            )
           ) : (
             <div style={{ padding: 24 }}>
               <p className="subtle" style={{ marginBottom: 12 }}>

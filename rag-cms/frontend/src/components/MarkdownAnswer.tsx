@@ -15,12 +15,13 @@ interface Props {
   onCitationClick?: (citation: AgentCitation, index1: number) => void;
 }
 
-// Matches BOTH:
-//   [1] / [12]               — numeric 1-indexed reference (legacy)
-//   【<uuid>】                — chunk_id wrapped in CJK brackets (new)
-// Captures:                    group 1 = number, group 2 = chunk_id
+// Matches ALL of:
+//   [1] / [12]               — numeric 1-indexed reference (legacy ASCII)
+//   【1】 / 【12】             — numeric 1-indexed reference in CJK brackets (LLM output)
+//   【<uuid>】                — chunk_id wrapped in CJK brackets
+// Captures: group 1 = ASCII number, group 2 = chunk_id (uuid), group 3 = CJK number
 const CITE_RE =
-  /\[(\d{1,2})\]|【\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\s*】/g;
+  /\[(\d{1,2})\]|【\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\s*】|【\s*(\d{1,2})\s*】/g;
 
 function processCitations(
   nodes: React.ReactNode,
@@ -40,8 +41,9 @@ function processCitations(
         if (m.index > last) out.push(n.slice(last, m.index));
 
         let resolved: { c: AgentCitation; index1: number } | null = null;
-        if (m[1]) {
-          const idx1 = parseInt(m[1], 10);
+        const numStr = m[1] || m[3]; // ASCII [N] или CJK 【N】
+        if (numStr) {
+          const idx1 = parseInt(numStr, 10);
           if (idx1 >= 1 && idx1 <= citations.length) {
             resolved = { c: citations[idx1 - 1], index1: idx1 };
           }
