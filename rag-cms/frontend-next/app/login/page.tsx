@@ -31,7 +31,17 @@ function LoginForm() {
 
   function destination(role: string): string {
     const redirect = params.get("redirect");
-    if (redirect && redirect.startsWith("/")) return redirect;
+    // Only allow same-site, absolute-path redirects. Reject protocol-relative
+    // ("//evil.com") and backslash variants ("/\evil.com") that browsers treat
+    // as off-site — otherwise this is an open redirect.
+    if (
+      redirect &&
+      redirect.startsWith("/") &&
+      !redirect.startsWith("//") &&
+      !redirect.startsWith("/\\")
+    ) {
+      return redirect;
+    }
     return role === "admin" ? "/admin/users" : "/";
   }
 

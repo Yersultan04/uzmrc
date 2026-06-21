@@ -21,7 +21,6 @@ import type {
   ChatSessionDetail,
   ChatSessionSummary,
   ChunkFull,
-  CompareReport,
   CompareRun,
   FileItem,
   IngestRun,
