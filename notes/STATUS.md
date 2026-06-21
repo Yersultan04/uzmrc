@@ -10,10 +10,19 @@
 - **Переключать в коде/конфиге было нечего:** старый rag_id нигде не захардкожен, `AboutSystem` тянет живые stats, единственный юзер = `admin@uzmrc.io` (видит все базы). «Переключение демо» = просто открывать новую базу.
 - **Старый RAG `348ee81f` («UzMRC Corpus (PDF, страницы)», 46/1552) удалён** по решению юзера (`DELETE /api/rags/...` → 204). На проде осталась 1 база, сирот-чанков 0, эмбеддинг-кэш сохранён.
 
-### Трек A — редизайн фронта на Next.js (в работе)
-- Решение юзера: **полный редизайн фронта на Next.js**, кодовая база `shared-ai-project` (Next.js 16 + React 19 + Zustand + shadcn/ui `base-nova` + Tailwind) как фундамент, под наш существующий FastAPI-бэк. Действующий React+Vite фронт остаётся на проде до готовности нового.
-- Разложен в `rag-cms/frontend-next/`. Этап 1 (фундамент: чистка от банковских фич MCP/HITL/cashier/confluence/agents/eval + API-слой/сторы/SSE под наш контракт + auth/middleware + каркас роутов) — Maya.
-- Этап 2 (экраны: Login/RagList/RagDetail/Chat + RagCompare с нуля + Shield security + Kai билд) — после этапа 1.
+### Трек A — редизайн фронта на Next.js ✅ СОБРАН (не задеплоен)
+- Решение юзера: **полный редизайн фронта на Next.js**, кодовая база `shared-ai-project` (Next.js 16 + React 19 + Zustand + shadcn/ui `base-nova` + Tailwind v4) как фундамент, под наш существующий FastAPI-бэк. Действующий React+Vite фронт остаётся на проде до готовности нового. Новый — в `rag-cms/frontend-next/`.
+- **Этап 1 (Maya)** — фундамент: чистка от банковских фич (MCP/HITL/cashier/confluence/agents/eval, ценное вынесено в `_reference/`), API-слой `lib/{api,types,auth,store}.ts` + SSE-хелперы под наш контракт, auth/middleware, rewrite `/api`→`:8088`. Коммит `55f986a`.
+- **Этап 2 (Maya+Zara, параллельно)** — экраны: AppShell+навигация, список баз, детали базы (вкладки Файлы/Индексация/О системе/Участники/Настройки, owner-vs-участник), чат с кликабельными цитатами 【n】 (порт из `_reference`; токенного стрима нет — рефетч сессии по `stream_end`), **RagCompare с нуля** (KPI/фильтр-чипы/находки судьи+grounding/экспорт md+print), админ-пользователи. Жаргон вычищен. Коммит `9a5404b`.
+- **Этап 2b** — Shield (security) + Kai (QA). Коммит `8a234e8`.
+  - **Shield:** блокеров нет. Fixed: cookie `SameSite=Strict`+`Secure` (`lib/auth.ts`), open-redirect в логине. Markdown-XSS — sanitize на месте. Accepted LOW: stream_token в URL, client-side admin-guard. **Эскалации на бэкенд (Maya):** (1) httpOnly+Secure cookie от сервера (полный фикс кражи токена через XSS), (2) подтвердить server-side authz на `/auth/users*` и per-rag эндпоинтах. Non-blocking: удалить `_reference/`, добавить CSP-заголовок.
+  - **Kai: readiness 84/100, PASS (gate ≥80), ship-eligible на staging.** Build/tsc/lint зелёные from scratch (7 роутов). Smoke (Playwright, mocked API + реальный login-флоу): все 5 роутов рендерятся, auth-guard 307→`/login` работает. 2 LOW: chat `active.runs.map` без гарда (mock-артефакт, реальный бэк всегда даёт `runs[]`), React #418 hydration на хард-релоаде auth-страниц (recoverable, фикс — SSR-стабильный плейсхолдер). Поправил dead import в `lib/api.ts`.
+
+### ⏭️ Остаток по фронту до прод-деплоя (НЕ сделано)
+1. **Live-backend E2E** — поднять postgres+backend (uzmrc-overlay/прямой), `next start` на `BACKEND_URL=:8088`, прогнать те же 5 роутов против реальных данных (login→базы→детали→чат с цитатами→compare с SSE). Закрывает −3 smoke и большую часть deploy-гэпа (→ ~92).
+2. **Wire в деплой:** `docker-compose.prod.yml` (строка ~84) `frontend.build.context` всё ещё `./frontend` (старый React+Vite) → перенацелить на `./frontend-next` + согласовать порт (Dockerfile `EXPOSE 8300` vs compose), прокинуть `BACKEND_URL` build-arg.
+3. **Staging-first** (золотое правило): сначала staging против реального бэка, потом прод.
+4. Опц.: `middleware.ts`→`proxy.ts` (Next 16 deprecation), фикс #418, Shield-эскалации на бэк.
 
 ## 🟢 Сессия 2026-06-21 (10) — полный корпус сайта + UX-переделка фронта + прод-деплой
 
