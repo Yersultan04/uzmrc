@@ -128,7 +128,7 @@ export default function App() {
           title="Командная палитра (⌘/Ctrl+K)"
         >
           <Search size={14} className="searchbar-icon" />
-          <span className="searchbar-label">Найти RAG, чат, команду…</span>
+          <span className="searchbar-label">Найти базу, чат, команду…</span>
           <span className="kbd">⌘K</span>
         </button>
         <button
