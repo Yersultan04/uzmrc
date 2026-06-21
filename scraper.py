@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse, json, re, ssl, sys, time, hashlib, urllib.request, urllib.parse
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from html.parser import HTMLParser
 from pathlib import Path
 
 BASE = "https://uzmrc.uz"
@@ -201,6 +202,109 @@ def download_all(urls: list[str]) -> list[dict]:
     return manifest
 
 
+# ---------------- HTML-контент (текст страниц, не только PDF) ----------------
+_MAIN_RE = re.compile(r"<main\b[^>]*>(.*?)</main>", re.I | re.S)
+_SKIP_TAGS = {"script", "style", "nav", "header", "footer", "aside", "form",
+              "button", "svg", "noscript", "iframe"}
+_BLOCK_TAGS = {"p", "br", "div", "li", "tr", "h1", "h2", "h3", "h4", "h5",
+               "h6", "section", "article", "table"}
+
+
+class _TextExtractor(HTMLParser):
+    """Сборщик видимого текста: пропускает служебные теги, расставляет переносы."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if tag in _SKIP_TAGS:
+            self._skip_depth += 1
+        elif tag in _BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in _SKIP_TAGS and self._skip_depth:
+            self._skip_depth -= 1
+        elif tag in _BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth == 0:
+            self.parts.append(data)
+
+
+def html_to_text(html: str) -> str:
+    """HTML → чистый текст. Приоритет содержимому <main>, иначе вся страница."""
+    m = _MAIN_RE.search(html)
+    chunk = m.group(1) if m else html
+    ex = _TextExtractor()
+    try:
+        ex.feed(chunk)
+    except Exception:
+        pass
+    text = "".join(ex.parts)
+    # схлопнуть пустые строки и хвостовые пробелы
+    lines = [ln.strip() for ln in text.splitlines()]
+    out: list[str] = []
+    blank = 0
+    for ln in lines:
+        if ln:
+            out.append(ln)
+            blank = 0
+        else:
+            blank += 1
+            if blank <= 1:
+                out.append("")
+    return "\n".join(out).strip()
+
+
+def slug_for(url: str) -> str:
+    """Стабильное имя файла из пути URL (раздел__страница__lang)."""
+    path = urllib.parse.urlsplit(url).path.strip("/")
+    path = re.sub(r"\.html?$", "", path, flags=re.I)
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", path).strip("-").lower()
+    return (slug or "index")[:150]
+
+
+def download_html(urls: list[str]) -> list[dict]:
+    """Скачать HTML-страницы, извлечь текст → corpus/html/<slug>.txt + манифест."""
+    out = HERE / "corpus" / "html"
+    out.mkdir(parents=True, exist_ok=True)
+    manifest: list[dict] = []
+
+    def work(u: str) -> dict:
+        html = get(u)
+        if not html:
+            return {"url": u, "error": "fetch failed"}
+        text = html_to_text(html)
+        if len(text) < 200:  # почти пусто → вероятно лендинг/листинг без контента
+            return {"url": u, "file": None, "chars": len(text), "skipped": "too_short"}
+        name = slug_for(u) + ".txt"
+        (out / name).write_text(text, encoding="utf-8")
+        return {"url": u, "file": name, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                "chars": len(text), "category": classify(u)}
+
+    with ThreadPoolExecutor(max_workers=12) as ex:
+        for i, rec in enumerate(ex.map(work, urls), 1):
+            manifest.append(rec)
+            if i % 50 == 0:
+                print(f"  html {i}/{len(urls)}")
+    return manifest
+
+
+def collect_html_pages() -> list[str]:
+    """Источники контент-страниц: notes/html_pages.txt (карта) ∪ sitemap (.htm)."""
+    pages: set[str] = set()
+    f = HERE / "notes" / "html_pages.txt"
+    if f.exists():
+        pages |= {ln.strip() for ln in f.read_text(encoding="utf-8").splitlines() if ln.strip()}
+    sm = get(BASE + "/sitemap.xml")
+    pages |= {u for u in LOC_RE.findall(sm) if re.search(r"\.html?$", u, re.I)}
+    return sorted(pages)
+
+
 def classify(url: str) -> str:
     u = url.lower()
     if "fakt" in u or "sushfakt" in u: return "Существенные факты"
@@ -215,7 +319,23 @@ def classify(url: str) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--download", action="store_true")
+    ap.add_argument("--html", action="store_true",
+                    help="скачать текст HTML-страниц (контент, не PDF) в corpus/html/")
     args = ap.parse_args()
+
+    if args.html:
+        print("=== HTML-проход: текст контент-страниц ===")
+        pages = collect_html_pages()
+        print(f"  страниц к загрузке: {len(pages)}")
+        man = download_html(pages)
+        (HERE / "corpus" / "manifest_html.json").write_text(
+            json.dumps(man, ensure_ascii=False, indent=2), encoding="utf-8")
+        ok = sum(1 for m in man if m.get("file"))
+        short = sum(1 for m in man if m.get("skipped"))
+        err = sum(1 for m in man if m.get("error"))
+        print(f"  сохранено: {ok} txt → corpus/html/ | пустых/листингов: {short} | ошибок: {err}")
+        print("  манифест: corpus/manifest_html.json")
+        return
 
     print("=== Pass A: витрины + пагинация ===")
     A = pass_a()
