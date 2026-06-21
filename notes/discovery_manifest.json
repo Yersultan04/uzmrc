@@ -93,12 +93,6 @@
     ],
     "category": "Нормативка"
   },
-  "https://uzmrc.uz/uploads/afillangan_shaxslar/aff.uzb.01.04.2026.pdf": {
-    "passes": [
-      "B"
-    ],
-    "category": "Прочее"
-  },
   "https://uzmrc.uz/uploads/aksiya_chiqarish_qaror/aksiyalar.ozgarishlar.pdf": {
     "passes": [
       "A",
@@ -160,6 +154,12 @@
     ],
     "category": "Прочее"
   },
+  "https://uzmrc.uz/uploads/content/aff.uzb.01.04.2026.pdf": {
+    "passes": [
+      "B"
+    ],
+    "category": "Прочее"
+  },
   "https://uzmrc.uz/uploads/emimssions/emissiyarisola05.12.2025.pdf": {
     "passes": [
       "A",
@@ -195,6 +195,13 @@
     ],
     "category": "Существенные факты"
   },
+  "https://uzmrc.uz/uploads/fakt_rus/21uzb08.05.2026.pdf": {
+    "passes": [
+      "A",
+      "B"
+    ],
+    "category": "Существенные факты"
+  },
   "https://uzmrc.uz/uploads/fakt_rus/21uzb30.03.2026.pdf": {
     "passes": [
       "A",
@@ -209,6 +216,20 @@
     ],
     "category": "Существенные факты"
   },
+  "https://uzmrc.uz/uploads/fakt_rus/32uzb10.06.2026.pdf": {
+    "passes": [
+      "A",
+      "B"
+    ],
+    "category": "Существенные факты"
+  },
+  "https://uzmrc.uz/uploads/fakt_rus/32uzb18.05.2026.pdf": {
+    "passes": [
+      "A",
+      "B"
+    ],
+    "category": "Существенные факты"
+  },
   "https://uzmrc.uz/uploads/fakt_rus/32uzb19.03.2026.pdf": {
     "passes": [
       "A",
@@ -217,6 +238,20 @@
     "category": "Существенные факты"
   },
   "https://uzmrc.uz/uploads/fakt_rus/32uzb24.03.2026.pdf": {
+    "passes": [
+      "A",
+      "B"
+    ],
+    "category": "Существенные факты"
+  },
+  "https://uzmrc.uz/uploads/fakt_rus/41uzb04.06.2026.pdf": {
+    "passes": [
+      "A",
+      "B"
+    ],
+    "category": "Существенные факты"
+  },
+  "https://uzmrc.uz/uploads/fakt_rus/6uzb04.06.2026.pdf": {
     "passes": [
       "A",
       "B"
@@ -246,13 +281,6 @@
       "A"
     ],
     "category": "Существенные факты"
-  },
-  "https://uzmrc.uz/uploads/files/BPlan2026-UZ.pdf": {
-    "passes": [
-      "A",
-      "B"
-    ],
-    "category": "Прочее"
   },
   "https://uzmrc.uz/uploads/files/UY-JOYREPORT2025.pdf": {
     "passes": [
@@ -448,8 +476,7 @@
   },
   "https://uzmrc.uz/uploads/muhim_faktlar/21uzb04.12.2025.pdf": {
     "passes": [
-      "A",
-      "B"
+      "A"
     ],
     "category": "Существенные факты"
   },
@@ -479,8 +506,7 @@
   },
   "https://uzmrc.uz/uploads/muhim_faktlar/25uzb05.12.2025.pdf": {
     "passes": [
-      "A",
-      "B"
+      "A"
     ],
     "category": "Существенные факты"
   },
@@ -601,8 +627,7 @@
   },
   "https://uzmrc.uz/uploads/muhim_faktlar/36uzb04.12.2025.pdf": {
     "passes": [
-      "A",
-      "B"
+      "A"
     ],
     "category": "Существенные факты"
   },
@@ -627,8 +652,7 @@
   },
   "https://uzmrc.uz/uploads/muhim_faktlar/38uzb05.12.2025.pdf": {
     "passes": [
-      "A",
-      "B"
+      "A"
     ],
     "category": "Существенные факты"
   },
@@ -722,8 +746,7 @@
   },
   "https://uzmrc.uz/uploads/muhim_faktlar/Dec_2025/32uzb18.12.2025.pdf": {
     "passes": [
-      "A",
-      "B"
+      "A"
     ],
     "category": "Существенные факты"
   },

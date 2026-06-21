@@ -1,0 +1,148 @@
+Mortgage Refin
+Company of Uzb
+Muvofiq ipoteka kreditlarining qayta moliyalashtirilish
+dinamikasi, mlrd so’m
+O’zIQMKning banklarga ajratgan kreditlari dinamikasi,
+mlrd so’m
+Qatnashuvchi banklardagi muvofiq ipoteka kreditlari dinamikasi, 
+mlrd so’m
+O’zIQMK faoliyatining 2022-yil 1- chorak qisqacha sarhisobi
+317,7
+293,3
+289,3
+171,1
+122,8
+120,3
+73,9 
+20,1
+20,0 
+ -
+ 200
+ 400
+ 600
+ 800
+ 1 000
+ 1 200
+ 1 400
+ 1 600
+ 1 800
+Aprel
+2021
+Iyul
+2021
+Oktabr
+2021
+Yanvar
+ 2022
+Aprel
+ 2022
+ SQB
+ Hamkorbank
+ Ipoteka Bank
+ QQB
+ Asakabank
+ Turonbank
+ Agrobank
+ Xalq bank
+ NBU
+431,5
+402,1
+358,0
+239,9
+215,0
+156,4
+115,9
+62,0
+27,5
+0
+50
+100
+150
+200
+250
+300
+350
+400
+450
+Aprel
+ 2021
+Iyul
+2021
+Oktabr
+ 2021
+Yanvar
+2022
+Aprel
+2022
+ SQB
+ Hamkorbank
+ Ipoteka Bank
+ Asakabank
+ QQB
+ Turonbank
+389,2
+363,5
+342,4
+215,0
+150,1
+147,5
+90,0
+24,2
+0
+200
+400
+600
+800
+1 000
+1 200
+1 400
+1 600
+1 800
+Aprel
+2021
+Iyul
+2021
+Oktabr
+2021
+Yanvar
+ 2022
+Aprel
+ 2022
+SQB
+Hamkorbank
+Ipoteka Bank
+QQB
+Asakabank
+Turonbank
+Agrobank
+NBU
+
+Mortgage Refin
+Company of Uzb
+Qayta moliyalashtirilgan portfelning
+gender bo’yicha tasnifi
+Qayta moliyalashtirilgan ipoteka kreditlarining hududlar bo’yicha taqsimlanishi, 
+soni bo’yicha
+[PERCENTAGE
+]
+[PERCENTAGE
+]
+ Ayol
+ Erkak
+[PERCENTAGE
+]
+[PERCENTAGE
+]
+[PERCENTAGE
+]
+[PERCENTAGE
+]
+≤ 30 y. 
+ (30; 40] y.
+ (40; 50]y.
+ > 50y.
+Qayta moliyalashtirilgan portfelning
+yosh bo’yicha tasnifi
+Tashkent c. (26.1%)
+Tashkent r. (14.8%)
+O’zIQMK faoliyatining 2022-yil 1- chorak qisqacha sarhisobi

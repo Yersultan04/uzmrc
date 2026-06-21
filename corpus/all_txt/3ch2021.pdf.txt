@@ -1,0 +1,135 @@
+318,7
+142,6
+257,1
+93,0
+133,5
+247,5
+18,7
+9,6
+Jan-21
+Mar-21
+May-21
+Jul-21
+30-Sep
+Ipoteka
+QQB
+SQB
+AGRO
+Asaka
+Hamkor
+Turon
+Xalq
+NBU
+miy muvofiq ipoteka portfelida banklarning alohida o’rni, mlrd. so’m
+77.8
+223.2
+475.3
+839.5
+1310.5
+Banklardagi muvofiq kreditlar dinamikasi, mlrd. so’m
+Dec-20
+Jan-21
+Feb-21
+Mar-21
+Apr-21
+May-21
+Jun-21
+Jul-21
+Aug-21
+Sep-21
+Ipoteka
+QQB
+SQB
+AGRO
+Asaka
+Hamkor
+Turon
+Xalq
+50%
+13%
+18%
+Ipoteka
+Mikroqarz
+Istemol
+Tadbirkorlikni
+rivojlantirish uchun
+kreditlar
+amlakatdagi jami chakana kreditning taqsimlanishi va O’zIQMK ulushi
+[VALUE]
+[VALUE]
+Birlamchi uy-
+joy fondi
+uchun
+Ikkilamchi
+uy-joy fondi
+uchun
+2021 - yilda ajratilgan ipoteka kreditlari va O’zIQMKning ulushi (mlrd. so’m
+O’zIQMK
+ulushi
+(97%)
+O’zIQMK
+ulushi
+(0.1%)
+
+Kreditlarning hududlar bo'yicha taqsimlanishi, mlrd. so’m
+Qoraqalog’iston
+89.8 (7%)
+Toshkent sh.
+449.04 (34%)
+Toshkent v.
+173.5 (13%)
+Navoiy
+109.2 (8%)
+Farg’ona
+64.3 (5%)
+Xorazm
+79.6 (6%)
+Andijon
+71.8 (5%)
+Qashqadaryo
+47.8 (4%)
+Surxondaryo
+30.2 (2%)
+Namangan
+45.6 (3%)
+Buxoro
+45.2 (3%)
+Samarqand
+41.8 (3%)
+Sirdaryo
+32.2 (2%)
+Jizzax
+30.6 (2%)
+1741
+3479
+1403
+671
+≤30 yosh
+(>30; ≤40) yosh
+(>40; ≤50) yosh
+> 50 yosh
+Kredit oluvchilarning yosh bo'yicha tasniflanishi, kishi
+29,2%
+70,8%
+Ayollar
+Erkaklar
+Ayollar:
+# - 2129
+Hajm - 365.7
+Erkaklar
+# - 5165 
+Hajm - 944.9
+Kreditlarning gender bo’yicha taqsimlanishi, mlrd. so’m
+15,77 
+8,31 
+704,48 
+572,17 
+16,5%
+17%
+17,5%
+18%
+15.8 (219 kishi)
+8.31 (108 kishi)
+704.5 (3690 kishi)
+572.7 (3277 kishi)
+Kreditlarining foiz bo'yicha tasniflanishi, mlrd so'm
