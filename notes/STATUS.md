@@ -2,6 +2,16 @@
 
 **Обновлено:** 2026-06-21
 
+## 🟢 Сессия 2026-06-21 (12) — новый Next.js фронт ЗАДЕПЛОЕН на прод (blue-green)
+
+- **Деплой завершён.** Новый фронт LIVE: `https://89.167.15.225.sslip.io` (публичный HTTPS, бренд UzMRC).
+- **Способ — blue-green:** `frontend-next` собран на сервере (`docker-compose.next.yml` overlay, образ `rag-cms-frontend-next` 276МБ, порт 127.0.0.1:8091→8300, `BACKEND_URL=http://backend:8000`). Старый `ragcms-frontend` (:8090, React+Vite) ОСТАВЛЕН РАБОТАЮЩИМ = мгновенный откат.
+- **Caddy** переключён `reverse_proxy localhost:8090 → 8091` (бэкап `/etc/caddy/Caddyfile.bak.8090`). Reload ok.
+- **Проверки live:** `/login` 200 (title «UzMRC — Нормативный AI-ассистент»), `/uzmrc-mark.svg` 200 (новый логотип — подтверждает что фронт новый), `/api` проксируется 200. Скрин `notes/.../e2e/11-prod-live.png`.
+- **Логин на проде:** `admin@uzmrc.io` + пароль из прод `.env` `BOOTSTRAP_ADMIN_PASSWORD` (НЕ трогал; локальный демо-пароль `UzmrcDemo2026!` — только в локальной БД).
+- **ОТКАТ (если что):** `sed -i "s/8091/8090/" /etc/caddy/Caddyfile && systemctl reload caddy` (вернёт старый фронт за секунды). Полностью снять новый: `docker compose -f docker-compose.prod.yml -f docker-compose.next.yml stop frontend-next`.
+- **Остаток (не блокирует):** старый `frontend` оставлен намеренно (откат) — снести после периода наблюдения; Shield-эскалации на бэк (httpOnly-cookie, server-side authz); `middleware.ts`→`proxy.ts`; фикс React #418.
+
 ## 🟢 Сессия 2026-06-21 (11) — закрыт хвост полного корпуса + старт редизайна фронта на Next.js
 
 ### Трек B — полный корпус на проде ✅ ЗАКРЫТ

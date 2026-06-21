@@ -1,0 +1,22 @@
+# Overlay: новый Next.js фронт (frontend-next) рядом со старым (blue-green).
+# Запуск:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.next.yml up -d frontend-next
+# Caddy переключается на localhost:8091. Старый frontend (:8090) остаётся откатом.
+services:
+  frontend-next:
+    build:
+      context: ./frontend-next
+      args:
+        BACKEND_URL: http://backend:8000
+    container_name: ragcms-frontend-next
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://backend:8000
+    ports:
+      - "127.0.0.1:8091:8300"
+    depends_on:
+      - backend
+    deploy:
+      resources:
+        limits:
+          memory: 512M
