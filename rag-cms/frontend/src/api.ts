@@ -248,7 +248,7 @@ export const api = {
   fetchFileBlob: async (
     rag_id: string,
     file_id: string,
-  ): Promise<{ url: string; mime: string }> => {
+  ): Promise<{ url: string; mime: string; blob: Blob }> => {
     const res = await fetch(`/api/rags/${rag_id}/files/${file_id}/blob`, {
       headers: authHeaders(),
     });
@@ -259,7 +259,7 @@ export const api = {
     }
     if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
     const blob = await res.blob();
-    return { url: URL.createObjectURL(blob), mime: blob.type || 'application/octet-stream' };
+    return { url: URL.createObjectURL(blob), mime: blob.type || 'application/octet-stream', blob };
   },
 
   uploadOneFile: (

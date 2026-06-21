@@ -515,7 +515,7 @@ function FilePreviewModal({
     let urlToRevoke: string | null = null;
     void (async () => {
       try {
-        const { url, mime } = await api.fetchFileBlob(ragId, fileId);
+        const { url, mime, blob } = await api.fetchFileBlob(ragId, fileId);
         if (cancelled) {
           URL.revokeObjectURL(url);
           return;
@@ -523,12 +523,13 @@ function FilePreviewModal({
         urlToRevoke = url;
         setBlobUrl(url);
         setMime(mime);
-        // Текстовые файлы (наш корпус — PDF→txt и HTML→txt) показываем прямо в окне
+        // Текстовые файлы (наш корпус — PDF→txt и HTML→txt) показываем прямо в окне.
+        // Читаем из Blob напрямую (blob.text()), НЕ через fetch(blob:) — иначе CSP connect-src блокирует.
         const asText =
           mime.startsWith('text/') ||
           /\.(txt|md|markdown|json|csv|log|html?)$/i.test(filename);
         if (asText) {
-          const txt = await (await fetch(url)).text();
+          const txt = await blob.text();
           if (!cancelled) setTextContent(txt);
         }
       } catch (e) {
