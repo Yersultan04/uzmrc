@@ -1,4 +1,5 @@
 import {
+  Bot,
   Database,
   Plus,
   Sparkles,
@@ -6,7 +7,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, type Preset, type Rag } from '../api';
 import { useAuth } from '../AuthContext';
 import { useToast } from '../ToastContext';
@@ -22,6 +23,7 @@ const LANG_OPTIONS = [
 
 export default function RagList() {
   const { session } = useAuth();
+  const navigate = useNavigate();
   const toast = useToast();
   const [rags, setRags] = useState<Rag[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
@@ -124,19 +126,18 @@ export default function RagList() {
           <div className="empty-halo">
             <Sparkles size={32} style={{ color: 'white' }} />
           </div>
-          <h2 style={{ marginTop: 20 }}>Пока ни одного RAG'а</h2>
+          <h2 style={{ marginTop: 20 }}>Пока ни одной базы знаний</h2>
           <p className="muted" style={{ marginTop: 6, maxWidth: 440, marginLeft: 'auto', marginRight: 'auto' }}>
-            Создайте первый, загрузите PDF / TXT / MD и спросите ReAct-агента —
-            до 40 шагов, с проверкой цитат.
+            Создайте первую базу, загрузите документы (PDF, TXT, MD) — и можно
+            задавать вопросы и проверять документы на противоречия.
           </p>
           <button style={{ marginTop: 20 }} onClick={() => setCreateOpen(true)}>
-            <Plus size={16} /> Создать первый RAG
+            <Plus size={16} /> Создать базу знаний
           </button>
         </div>
       ) : (
         <div className="tickers">
           {rags.map((r) => {
-            const fts = (r.settings as { fts_language?: string } | undefined)?.fts_language;
             const role = r.role ?? (r.owner_id === session?.user.id ? 'owner' : 'none');
             const canDelete = role === 'owner' || role === 'admin';
             return (
@@ -147,8 +148,6 @@ export default function RagList() {
                 </div>
                 <div className="desc">{r.description || 'Без описания'}</div>
                 <div className="meta">
-                  <span>embed <b>{r.embed_dim}</b></span>
-                  {fts && <span>fts <b>{fts}</b></span>}
                   {role === 'member' && (
                     <span
                       className={`badge ${r.member_status === 'revoked' ? 'danger' : 'accent'}`}
@@ -162,9 +161,17 @@ export default function RagList() {
                   )}
                 </div>
                 <div className="spread">
-                  <span className="subtle mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {r.id.slice(0, 8)}…
-                  </span>
+                  {r.status === 'ready' ? (
+                    <button
+                      className="ghost sm"
+                      title="Открыть чат"
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); navigate(`/rag/${r.id}/chat`); }}
+                    >
+                      <Bot size={14} /> Чат
+                    </button>
+                  ) : (
+                    <span className="subtle">{r.status === 'failed' ? 'ошибка индексации' : 'готовится…'}</span>
+                  )}
                   {canDelete && (
                     <button
                       className="icon"
