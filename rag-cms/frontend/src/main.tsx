@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
-import App from './App';
+import App, { ChatRedirect } from './App';
 import { AuthProvider } from './AuthContext';
 import { ThemeProvider } from './ThemeContext';
 import { BindToastBridge, ToastProvider } from './ToastContext';
@@ -30,6 +30,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                   element={
                     <RequireAuth>
                       <RagList />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="chat"
+                  element={
+                    <RequireAuth>
+                      <ChatRedirect />
                     </RequireAuth>
                   }
                 />

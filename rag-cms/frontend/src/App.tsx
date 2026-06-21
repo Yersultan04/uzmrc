@@ -1,14 +1,17 @@
 import {
   Info,
   LayoutDashboard,
+  Loader2,
   LogOut,
   Moon,
+  MessageSquare,
   Search,
   Sun,
   Users,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useMatch, useNavigate } from 'react-router-dom';
+import { api } from './api';
 import { useAuth } from './AuthContext';
 import { CommandPalette } from './CommandPalette';
 import { useTheme } from './ThemeContext';
@@ -17,6 +20,33 @@ const CREATE_RAG_EVENT = 'ragcms:open-create-rag';
 
 export function openCreateRag() {
   window.dispatchEvent(new CustomEvent(CREATE_RAG_EVENT));
+}
+
+/** /chat — открывает чат первой готовой базы (или ведёт на главную, если готовых нет). */
+export function ChatRedirect() {
+  const navigate = useNavigate();
+  const [msg, setMsg] = useState('Открываю чат…');
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const rags = await api.listRags();
+        const ready = rags.find((r) => r.status === 'ready');
+        if (!alive) return;
+        if (ready) navigate(`/rag/${ready.id}/chat`, { replace: true });
+        else { setMsg('Нет готовых баз — открываю список.'); navigate('/', { replace: true }); }
+      } catch {
+        if (alive) navigate('/', { replace: true });
+      }
+    })();
+    return () => { alive = false; };
+  }, [navigate]);
+  return (
+    <div className="col" style={{ alignItems: 'center', justifyContent: 'center', minHeight: '60vh', gap: 12 }}>
+      <Loader2 className="spinner" size={28} />
+      <span className="muted">{msg}</span>
+    </div>
+  );
 }
 
 export default function App() {
@@ -88,10 +118,13 @@ export default function App() {
         className="sidebar"
         style={{ width: 64, minWidth: 64, maxWidth: 64, gridArea: 'sidebar' }}
       >
-        <NavLink to="/" end className="brand" title="На главную" style={{ cursor: 'pointer' }}>
+        <NavLink to="/chat" className="brand" title="Открыть чат" style={{ cursor: 'pointer' }}>
           <BrandMark />
         </NavLink>
         <nav>
+          <NavLink to="/chat" className={navClass} title="Чат с базой">
+            <MessageSquare size={18} /> <span className="nav-label">Чат</span>
+          </NavLink>
           <NavLink to="/" end className={navClass} title="Базы знаний">
             <LayoutDashboard size={18} /> <span className="nav-label">Базы</span>
           </NavLink>
