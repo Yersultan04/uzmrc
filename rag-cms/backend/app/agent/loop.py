@@ -13,7 +13,12 @@ from sqlalchemy import select
 
 from app.agent.events import EventBroker
 from app.agent.grounding import ground_citations
-from app.agent.prompts import build_smalltalk_message, build_system_message
+from app.agent.prompts import (
+    build_admin_instructions,
+    build_smalltalk_message,
+    build_system_message,
+    check_restricted_topics,
+)
 from app.agent.router import RouteDecision, route_query
 from app.agent.schemas import (
     Citation,
@@ -460,7 +465,46 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
             route = None
             await broker.publish("router_failed", {"error": str(e)[:200]})
 
-        persona_override = rag_settings.get("persona")
+        # Admin-configured persona: structured ai_config takes precedence, with
+        # the legacy free-text `persona` key as a fallback. Flattened into the
+        # instruction block appended after the base persona.
+        ai_config = rag_settings.get("ai_config") if isinstance(rag_settings.get("ai_config"), dict) else None
+        persona_override = build_admin_instructions(ai_config, rag_settings.get("persona")) or None
+
+        # Restricted-topics guard: if the query mentions an admin-banned keyword,
+        # refuse politely and stop — no retrieval, no escalation. Mirrors Elza's
+        # ContentFilter guardrail.
+        is_restricted, restriction_msg = check_restricted_topics(ai_config, query)
+        if is_restricted:
+            run.status = AgentRunStatus.succeeded
+            run.answer = restriction_msg
+            run.citations = []
+            run.confidence = 1.0
+            run.steps_used = 0
+            run.telemetry = {
+                "elapsed_sec": round(time.monotonic() - t0, 3),
+                "pool_size": 0,
+                "scratchpad_keys": [],
+                "terminated_reason": "restricted_topic",
+                "prior_turns_used": len(prior_turns),
+                "router": {"kind": route.kind, "via": route.via, "confidence": route.confidence}
+                if route is not None else None,
+            }
+            run.finished_at = datetime.now(timezone.utc)
+            await db.commit()
+            await broker.publish(
+                "final_answer",
+                {"step": 0, "answer": restriction_msg, "confidence": 1.0,
+                 "raw_confidence": 1.0, "citations": [], "warnings": []},
+            )
+            await broker.publish(
+                "run_finished",
+                {"status": run.status.value, "steps_used": 0,
+                 "elapsed_sec": run.telemetry["elapsed_sec"]},
+            )
+            await broker.close()
+            await EventBroker.pop(run_id)
+            return
 
         # Short-circuit: smalltalk / greeting / identity / off-topic. Answer
         # directly as the assistant persona — no retrieval, no escalation. This

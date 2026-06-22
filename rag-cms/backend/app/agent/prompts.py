@@ -242,3 +242,99 @@ Output ONLY the plain reply text — no JSON, no markdown headers, no citations.
 
 def build_smalltalk_message(persona_override: str | None = None) -> str:
     return SMALLTALK_SYSTEM.replace("{persona}", _resolve_persona(persona_override))
+
+
+# --- Structured AI config (admin panel) ---------------------------------------
+# An admin can configure the assistant per-RAG via rag.settings['ai_config'],
+# a dict mirroring Elza's AIConfig:
+#   {
+#     "tone": str,                 # Tone & Personality
+#     "dos": [str],                # Things the AI should do
+#     "donts": [str],              # Things the AI should NOT do
+#     "ethics": str,               # Ethics & safety principles
+#     "languages": [str],          # preferred answer languages (ISO codes), in order
+#     "restricted_topics": [str],  # keywords that trigger a polite refusal
+#     "restriction_message": str,  # message shown when a restricted topic is hit
+#   }
+# build_admin_instructions() flattens it into the single "ADMIN-CONFIGURED
+# BEHAVIOR" text block that _resolve_persona appends after the base persona.
+
+_LANG_NAMES = {
+    "ru": "русском", "uz": "узбекском", "en": "английском",
+    "kk": "казахском", "tr": "турецком", "es": "испанском",
+    "de": "немецком", "fr": "французском",
+}
+
+DEFAULT_RESTRICTION_MESSAGE = (
+    "Извините, я не могу обсуждать эту тему. Пожалуйста, задайте вопрос, "
+    "на который можно ответить по нормативной базе UzMRC."
+)
+
+
+def _clean_list(items) -> list[str]:
+    if not isinstance(items, list):
+        return []
+    return [str(x).strip() for x in items if str(x or "").strip()]
+
+
+def build_admin_instructions(
+    ai_config: dict | None, legacy_persona: str | None = None
+) -> str:
+    """Flatten a structured ai_config (or a legacy free-text persona) into the
+    admin-instruction block appended after the base persona. Returns "" when
+    nothing is configured.
+    """
+    if not ai_config:
+        return (legacy_persona or "").strip()
+
+    parts: list[str] = []
+
+    tone = str(ai_config.get("tone") or "").strip()
+    if tone:
+        parts.append(tone)
+
+    dos = _clean_list(ai_config.get("dos"))
+    donts = _clean_list(ai_config.get("donts"))
+    if dos:
+        parts.append("You should:\n" + "\n".join(f"{i}. {r}" for i, r in enumerate(dos, 1)))
+    if donts:
+        parts.append("You should NOT:\n" + "\n".join(f"{i}. {r}" for i, r in enumerate(donts, 1)))
+
+    ethics = str(ai_config.get("ethics") or "").strip()
+    if ethics:
+        parts.append("Ethics & safety principles:\n" + ethics)
+
+    langs = _clean_list(ai_config.get("languages"))
+    if langs:
+        named = ", ".join(_LANG_NAMES.get(l.lower(), l) for l in langs)
+        parts.append(
+            "Предпочитаемый язык ответа (если язык вопроса определить нельзя), "
+            f"в порядке приоритета: {named}. Но язык пользователя всегда важнее."
+        )
+
+    restricted = _clean_list(ai_config.get("restricted_topics"))
+    if restricted:
+        msg = str(ai_config.get("restriction_message") or "").strip() or DEFAULT_RESTRICTION_MESSAGE
+        parts.append(
+            "Restricted topics: if the user's question is about any of "
+            f"[{', '.join(restricted)}], do NOT answer it. Instead reply exactly: "
+            f"«{msg}»"
+        )
+
+    return "\n\n".join(parts).strip()
+
+
+def check_restricted_topics(ai_config: dict | None, query: str) -> tuple[bool, str]:
+    """Case-insensitive substring match of the query against restricted_topics.
+    Returns (is_restricted, refusal_message). Mirrors Elza's check_topic_restriction.
+    """
+    if not ai_config:
+        return False, ""
+    restricted = _clean_list(ai_config.get("restricted_topics"))
+    if not restricted:
+        return False, ""
+    q = (query or "").lower()
+    if any(t.lower() in q for t in restricted):
+        msg = str(ai_config.get("restriction_message") or "").strip() or DEFAULT_RESTRICTION_MESSAGE
+        return True, msg
+    return False, ""

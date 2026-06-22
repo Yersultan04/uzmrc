@@ -16,8 +16,10 @@ import {
   Info,
   Loader2,
   Play,
+  Plus,
   RotateCcw,
   Settings,
+  ShieldAlert,
   Trash2,
   Upload,
   UserPlus,
@@ -992,7 +994,7 @@ function SettingsTab({
 
   return (
     <div className="flex flex-col gap-4">
-      <PersonaCard rag={rag} onUpdated={onUpdated} />
+      <AIConfigCard rag={rag} onUpdated={onUpdated} />
       <Card>
         <CardContent className="flex items-center justify-between gap-4">
           <div>
@@ -1016,37 +1018,94 @@ function SettingsTab({
   );
 }
 
-/* Editable assistant persona. The base identity (UzMRC normative assistant) is
-   fixed in the backend; this text is appended as "ADMIN-CONFIGURED BEHAVIOR" —
-   extra rules for tone, language, scope, etc. Empty → resets to the default. */
-const PERSONA_MAX = 4000;
+/* Structured assistant configuration (Tone / Do / Don't / Ethics / Languages /
+   Restricted topics). The base identity (UzMRC normative assistant) is fixed in
+   the backend; everything here is appended as "ADMIN-CONFIGURED BEHAVIOR".
+   Stored in rag.settings.ai_config — applied live, no redeploy. */
 
-function PersonaCard({
+interface AIConfig {
+  tone: string;
+  dos: string[];
+  donts: string[];
+  ethics: string;
+  languages: string[];
+  restricted_topics: string[];
+  restriction_message: string;
+}
+
+const EMPTY_AICONFIG: AIConfig = {
+  tone: "",
+  dos: [],
+  donts: [],
+  ethics: "",
+  languages: [],
+  restricted_topics: [],
+  restriction_message: "",
+};
+
+function normalizeAIConfig(settings: Record<string, unknown>): AIConfig {
+  const raw = (settings?.ai_config ?? null) as Partial<AIConfig> | null;
+  if (raw && typeof raw === "object") {
+    return {
+      tone: String(raw.tone ?? ""),
+      dos: Array.isArray(raw.dos) ? raw.dos.map(String) : [],
+      donts: Array.isArray(raw.donts) ? raw.donts.map(String) : [],
+      ethics: String(raw.ethics ?? ""),
+      languages: Array.isArray(raw.languages) ? raw.languages.map(String) : [],
+      restricted_topics: Array.isArray(raw.restricted_topics)
+        ? raw.restricted_topics.map(String)
+        : [],
+      restriction_message: String(raw.restriction_message ?? ""),
+    };
+  }
+  // Migrate the legacy free-text persona into the Tone field on first open.
+  const legacy = String((settings as { persona?: string })?.persona ?? "");
+  return { ...EMPTY_AICONFIG, tone: legacy };
+}
+
+function aiConfigIsEmpty(c: AIConfig): boolean {
+  return (
+    !c.tone.trim() &&
+    !c.ethics.trim() &&
+    !c.restriction_message.trim() &&
+    c.dos.length === 0 &&
+    c.donts.length === 0 &&
+    c.languages.length === 0 &&
+    c.restricted_topics.length === 0
+  );
+}
+
+function AIConfigCard({
   rag,
   onUpdated,
 }: {
   rag: Rag;
   onUpdated: (r: Rag) => void;
 }) {
-  const saved = String((rag.settings as { persona?: string })?.persona ?? "");
-  const [text, setText] = useState(saved);
+  const saved = useMemo(() => normalizeAIConfig(rag.settings), [rag.settings]);
+  const [cfg, setCfg] = useState<AIConfig>(saved);
   const [busy, setBusy] = useState(false);
-  const dirty = text !== saved;
-  const tooLong = text.length > PERSONA_MAX;
+  const dirty = JSON.stringify(cfg) !== JSON.stringify(saved);
+
+  function patch(p: Partial<AIConfig>) {
+    setCfg((c) => ({ ...c, ...p }));
+  }
 
   async function save() {
-    if (tooLong) return;
     setBusy(true);
     try {
+      const empty = aiConfigIsEmpty(cfg);
+      // Clear the legacy persona key too, so behaviour comes only from ai_config.
       const updated = await ragsApi.updateSettings(rag.id, {
-        persona: text.trim(),
+        ai_config: empty ? null : cfg,
+        persona: "",
       });
       onUpdated(updated);
       toast.success(
-        text.trim() ? "Персона ассистента сохранена" : "Персона сброшена к стандартной",
+        empty ? "Настройки сброшены к стандартным" : "Настройки ассистента сохранены",
       );
     } catch (e) {
-      toast.error((e as Error).message || "Не удалось сохранить персону");
+      toast.error((e as Error).message || "Не удалось сохранить настройки");
     } finally {
       setBusy(false);
     }
@@ -1054,62 +1113,275 @@ function PersonaCard({
 
   return (
     <Card>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-5">
         <div>
           <div className="flex items-center gap-2 text-sm font-medium">
             <Bot className="h-4 w-4 text-primary" />
-            Персона ассистента
+            Поведение ассистента
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            Базовая роль ассистента (нормативный помощник UzMRC) зашита в системе.
-            Здесь можно задать <span className="font-medium">дополнительные правила</span>:
-            тон общения, язык ответов, ограничения по темам, формулировки. Эти инструкции
-            добавляются к базовой персоне без переразвёртывания. Оставьте пустым — вернётся
-            стандартное поведение.
+            Базовая роль (нормативный помощник UzMRC) зашита в системе. Здесь
+            настраиваются <span className="font-medium">дополнительные правила</span> —
+            применяются сразу, без переразвёртывания. Оставьте всё пустым, чтобы
+            вернуть стандартное поведение.
           </p>
         </div>
-        <Textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={7}
-          placeholder={
-            "Например:\n— Отвечай в официально-деловом тоне.\n— По умолчанию отвечай на русском, если вопрос на узбекском — на узбекском.\n— Не давай юридических консультаций, только пересказывай нормы со ссылкой на источник.\n— Если вопрос вне нормативной базы UzMRC — вежливо откажись."
-          }
-          className="resize-y font-normal"
-        />
-        <div className="flex items-center justify-between gap-3">
-          <span
-            className={cn(
-              "text-xs",
-              tooLong ? "text-destructive" : "text-muted-foreground",
-            )}
-          >
-            {text.length} / {PERSONA_MAX}
-          </span>
-          <div className="flex items-center gap-2">
-            {dirty && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setText(saved)}
-                disabled={busy}
-              >
-                Отменить
-              </Button>
-            )}
-            {saved && !text.trim() && (
-              <span className="text-xs text-muted-foreground">
-                Сохранение очистит персону
-              </span>
-            )}
-            <Button onClick={save} disabled={busy || !dirty || tooLong} size="sm">
-              {busy && <Loader2 className="animate-spin" />}
-              Сохранить
-            </Button>
+
+        {/* Tone & Personality */}
+        <Field
+          label="Тон и характер"
+          hint="Как ассистент общается: тон, манера, акценты."
+        >
+          <Textarea
+            value={cfg.tone}
+            onChange={(e) => patch({ tone: e.target.value })}
+            rows={3}
+            placeholder="Напр.: Официально-деловой тон, вежливо, на «вы», без эмодзи и разговорных выражений."
+            className="resize-y"
+          />
+        </Field>
+
+        {/* Behaviour rules */}
+        <div className="grid gap-5 sm:grid-cols-2">
+          <RuleListEditor
+            label="Что ассистент ДОЛЖЕН делать"
+            items={cfg.dos}
+            onChange={(dos) => patch({ dos })}
+            placeholder="Добавить правило…"
+            tone="do"
+          />
+          <RuleListEditor
+            label="Что ассистент НЕ должен делать"
+            items={cfg.donts}
+            onChange={(donts) => patch({ donts })}
+            placeholder="Добавить ограничение…"
+            tone="dont"
+          />
+        </div>
+
+        {/* Ethics */}
+        <Field
+          label="Этика и безопасность"
+          hint="Принципы: правдивость, ссылки на источник, отказ при отсутствии данных."
+        >
+          <Textarea
+            value={cfg.ethics}
+            onChange={(e) => patch({ ethics: e.target.value })}
+            rows={3}
+            placeholder="Напр.: Давать только достоверную информацию из базы. Не выдумывать. При отсутствии данных — честно сообщать."
+            className="resize-y"
+          />
+        </Field>
+
+        {/* Languages */}
+        <Field
+          label="Предпочитаемые языки ответа"
+          hint="ISO-коды по приоритету (ru, uz, en). Язык вопроса пользователя всегда важнее."
+        >
+          <ChipEditor
+            items={cfg.languages}
+            onChange={(languages) => patch({ languages })}
+            placeholder="ru, uz, en…"
+            transform={(s) => s.toLowerCase().slice(0, 8)}
+          />
+        </Field>
+
+        {/* Restricted topics */}
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <ShieldAlert className="h-4 w-4 text-amber-600" />
+            Запрещённые темы
           </div>
+          <p className="mt-1 mb-2 text-xs text-muted-foreground">
+            Ключевые слова: если вопрос их содержит, ассистент вежливо откажется
+            (поиск по подстроке — вводите основу слова, напр. «политик» поймает
+            «политика/политику/политики»).
+          </p>
+          <ChipEditor
+            items={cfg.restricted_topics}
+            onChange={(restricted_topics) => patch({ restricted_topics })}
+            placeholder="Добавить ключевое слово…"
+            transform={(s) => s.slice(0, 80)}
+          />
+          <div className="mt-3">
+            <Field label="Сообщение при отказе" hint="">
+              <Textarea
+                value={cfg.restriction_message}
+                onChange={(e) => patch({ restriction_message: e.target.value })}
+                rows={2}
+                placeholder="Извините, я не могу обсуждать эту тему. Задайте вопрос по нормативной базе UzMRC."
+                className="resize-y"
+              />
+            </Field>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
+          {dirty && (
+            <Button variant="ghost" size="sm" onClick={() => setCfg(saved)} disabled={busy}>
+              Отменить
+            </Button>
+          )}
+          <Button onClick={save} disabled={busy || !dirty} size="sm">
+            {busy && <Loader2 className="animate-spin" />}
+            Сохранить
+          </Button>
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="text-sm font-medium">{label}</div>
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+      {children}
+    </div>
+  );
+}
+
+/* Editable list of free-text rules (dos / donts). */
+function RuleListEditor({
+  label,
+  items,
+  onChange,
+  placeholder,
+  tone,
+}: {
+  label: string;
+  items: string[];
+  onChange: (items: string[]) => void;
+  placeholder: string;
+  tone: "do" | "dont";
+}) {
+  const [draft, setDraft] = useState("");
+  const dot = tone === "do" ? "bg-primary" : "bg-amber-600";
+
+  function add() {
+    const v = draft.trim();
+    if (!v) return;
+    onChange([...items, v]);
+    setDraft("");
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-medium">{label}</div>
+      <ul className="space-y-1.5">
+        {items.map((item, i) => (
+          <li key={i} className="flex items-start gap-2 text-sm">
+            <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", dot)} />
+            <span className="min-w-0 flex-1 break-words">{item}</span>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => onChange(items.filter((_, j) => j !== i))}
+              title="Удалить"
+              aria-label="Удалить правило"
+            >
+              <X className="text-muted-foreground" />
+            </Button>
+          </li>
+        ))}
+        {items.length === 0 && (
+          <li className="text-xs text-muted-foreground">Пока нет правил.</li>
+        )}
+      </ul>
+      <div className="flex gap-2">
+        <Input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+          placeholder={placeholder}
+          className="h-8 text-sm"
+        />
+        <Button variant="outline" size="sm" onClick={add} disabled={!draft.trim()}>
+          <Plus />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/* Editable chip list (languages / restricted keywords). */
+function ChipEditor({
+  items,
+  onChange,
+  placeholder,
+  transform = (s) => s,
+}: {
+  items: string[];
+  onChange: (items: string[]) => void;
+  placeholder: string;
+  transform?: (s: string) => string;
+}) {
+  const [draft, setDraft] = useState("");
+
+  function add() {
+    const v = transform(draft.trim());
+    if (!v || items.includes(v)) {
+      setDraft("");
+      return;
+    }
+    onChange([...items, v]);
+    setDraft("");
+  }
+
+  return (
+    <div className="space-y-2">
+      {items.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {items.map((item, i) => (
+            <span
+              key={i}
+              className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-xs"
+            >
+              {item}
+              <button
+                type="button"
+                onClick={() => onChange(items.filter((_, j) => j !== i))}
+                className="rounded-full hover:bg-foreground/10"
+                aria-label={`Удалить ${item}`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <Input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault();
+              add();
+            }
+          }}
+          placeholder={placeholder}
+          className="h-8 text-sm"
+        />
+        <Button variant="outline" size="sm" onClick={add} disabled={!draft.trim()}>
+          <Plus />
+        </Button>
+      </div>
+    </div>
   );
 }
 

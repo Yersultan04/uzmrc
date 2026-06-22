@@ -102,6 +102,40 @@ async def get_rag_detail(
     return await _decorate(db, rag, user)
 
 
+def _validate_ai_config(v: object) -> dict:
+    """Sanitise a structured ai_config payload from the admin panel. Drops unknown
+    keys, enforces types and bounds. Raises HTTPException(400) on gross misuse."""
+    if not isinstance(v, dict):
+        raise HTTPException(400, "ai_config must be an object")
+
+    def _str(key: str, limit: int) -> str:
+        s = str(v.get(key) or "").strip()
+        if len(s) > limit:
+            raise HTTPException(400, f"ai_config.{key} too long (max {limit})")
+        return s
+
+    def _list(key: str, max_items: int, item_limit: int) -> list[str]:
+        raw = v.get(key) or []
+        if not isinstance(raw, list):
+            raise HTTPException(400, f"ai_config.{key} must be a list")
+        out: list[str] = []
+        for item in raw[:max_items]:
+            s = str(item or "").strip()
+            if s:
+                out.append(s[:item_limit])
+        return out
+
+    return {
+        "tone": _str("tone", 2000),
+        "dos": _list("dos", 40, 300),
+        "donts": _list("donts", 40, 300),
+        "ethics": _str("ethics", 2000),
+        "languages": _list("languages", 10, 8),
+        "restricted_topics": _list("restricted_topics", 60, 80),
+        "restriction_message": _str("restriction_message", 600),
+    }
+
+
 @router.patch("/{rag_id}/settings", response_model=RagOut)
 async def update_rag_settings(
     payload: dict = Body(...),
@@ -109,8 +143,8 @@ async def update_rag_settings(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RagOut:
-    """Owner-only. Whitelisted keys: web_search_enabled, fts_language, persona."""
-    ALLOWED = {"web_search_enabled", "fts_language", "persona"}
+    """Owner-only. Whitelisted keys: web_search_enabled, fts_language, persona, ai_config."""
+    ALLOWED = {"web_search_enabled", "fts_language", "persona", "ai_config"}
     current = dict(rag.settings or {})
     for k, v in (payload or {}).items():
         if k not in ALLOWED:
@@ -120,8 +154,7 @@ async def update_rag_settings(
         elif k == "fts_language":
             current[k] = str(v).strip().lower()[:32] or "simple"
         elif k == "persona":
-            # Admin-configured behaviour appended after the hardcoded base persona
-            # (see app/agent/prompts.py:_resolve_persona). Empty → reset to default.
+            # Legacy free-text persona. Empty → reset to default.
             txt = str(v or "").strip()
             if len(txt) > 4000:
                 raise HTTPException(400, "persona too long (max 4000 characters)")
@@ -129,6 +162,13 @@ async def update_rag_settings(
                 current["persona"] = txt
             else:
                 current.pop("persona", None)
+        elif k == "ai_config":
+            # Structured AI config (tone / dos / donts / ethics / languages /
+            # restricted_topics / restriction_message). Empty/None → reset.
+            if not v:
+                current.pop("ai_config", None)
+            else:
+                current["ai_config"] = _validate_ai_config(v)
     rag.settings = current
     await db.commit()
     await db.refresh(rag)
