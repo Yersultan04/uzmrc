@@ -109,8 +109,8 @@ async def update_rag_settings(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ) -> RagOut:
-    """Owner-only. Whitelisted keys: web_search_enabled, fts_language."""
-    ALLOWED = {"web_search_enabled", "fts_language"}
+    """Owner-only. Whitelisted keys: web_search_enabled, fts_language, persona."""
+    ALLOWED = {"web_search_enabled", "fts_language", "persona"}
     current = dict(rag.settings or {})
     for k, v in (payload or {}).items():
         if k not in ALLOWED:
@@ -119,6 +119,16 @@ async def update_rag_settings(
             current[k] = bool(v)
         elif k == "fts_language":
             current[k] = str(v).strip().lower()[:32] or "simple"
+        elif k == "persona":
+            # Admin-configured behaviour appended after the hardcoded base persona
+            # (see app/agent/prompts.py:_resolve_persona). Empty → reset to default.
+            txt = str(v or "").strip()
+            if len(txt) > 4000:
+                raise HTTPException(400, "persona too long (max 4000 characters)")
+            if txt:
+                current["persona"] = txt
+            else:
+                current.pop("persona", None)
     rag.settings = current
     await db.commit()
     await db.refresh(rag)

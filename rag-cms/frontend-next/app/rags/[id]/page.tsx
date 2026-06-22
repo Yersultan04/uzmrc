@@ -43,6 +43,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 type TabKey = "files" | "index" | "about" | "members" | "settings";
@@ -991,6 +992,7 @@ function SettingsTab({
 
   return (
     <div className="flex flex-col gap-4">
+      <PersonaCard rag={rag} onUpdated={onUpdated} />
       <Card>
         <CardContent className="flex items-center justify-between gap-4">
           <div>
@@ -1011,6 +1013,103 @@ function SettingsTab({
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/* Editable assistant persona. The base identity (UzMRC normative assistant) is
+   fixed in the backend; this text is appended as "ADMIN-CONFIGURED BEHAVIOR" —
+   extra rules for tone, language, scope, etc. Empty → resets to the default. */
+const PERSONA_MAX = 4000;
+
+function PersonaCard({
+  rag,
+  onUpdated,
+}: {
+  rag: Rag;
+  onUpdated: (r: Rag) => void;
+}) {
+  const saved = String((rag.settings as { persona?: string })?.persona ?? "");
+  const [text, setText] = useState(saved);
+  const [busy, setBusy] = useState(false);
+  const dirty = text !== saved;
+  const tooLong = text.length > PERSONA_MAX;
+
+  async function save() {
+    if (tooLong) return;
+    setBusy(true);
+    try {
+      const updated = await ragsApi.updateSettings(rag.id, {
+        persona: text.trim(),
+      });
+      onUpdated(updated);
+      toast.success(
+        text.trim() ? "Персона ассистента сохранена" : "Персона сброшена к стандартной",
+      );
+    } catch (e) {
+      toast.error((e as Error).message || "Не удалось сохранить персону");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardContent className="space-y-3">
+        <div>
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Bot className="h-4 w-4 text-primary" />
+            Персона ассистента
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Базовая роль ассистента (нормативный помощник UzMRC) зашита в системе.
+            Здесь можно задать <span className="font-medium">дополнительные правила</span>:
+            тон общения, язык ответов, ограничения по темам, формулировки. Эти инструкции
+            добавляются к базовой персоне без переразвёртывания. Оставьте пустым — вернётся
+            стандартное поведение.
+          </p>
+        </div>
+        <Textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={7}
+          placeholder={
+            "Например:\n— Отвечай в официально-деловом тоне.\n— По умолчанию отвечай на русском, если вопрос на узбекском — на узбекском.\n— Не давай юридических консультаций, только пересказывай нормы со ссылкой на источник.\n— Если вопрос вне нормативной базы UzMRC — вежливо откажись."
+          }
+          className="resize-y font-normal"
+        />
+        <div className="flex items-center justify-between gap-3">
+          <span
+            className={cn(
+              "text-xs",
+              tooLong ? "text-destructive" : "text-muted-foreground",
+            )}
+          >
+            {text.length} / {PERSONA_MAX}
+          </span>
+          <div className="flex items-center gap-2">
+            {dirty && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setText(saved)}
+                disabled={busy}
+              >
+                Отменить
+              </Button>
+            )}
+            {saved && !text.trim() && (
+              <span className="text-xs text-muted-foreground">
+                Сохранение очистит персону
+              </span>
+            )}
+            <Button onClick={save} disabled={busy || !dirty || tooLong} size="sm">
+              {busy && <Loader2 className="animate-spin" />}
+              Сохранить
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
