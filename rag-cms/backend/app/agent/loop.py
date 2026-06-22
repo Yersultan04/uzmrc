@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from app.agent.events import EventBroker
 from app.agent.grounding import ground_citations
-from app.agent.prompts import build_system_message
+from app.agent.prompts import build_smalltalk_message, build_system_message
 from app.agent.router import RouteDecision, route_query
 from app.agent.schemas import (
     Citation,
@@ -98,6 +98,7 @@ def _build_messages(
     route: RouteDecision | None = None,
     prior_turns: list[dict] | None = None,
     web_search_enabled: bool = False,
+    persona_override: str | None = None,
 ) -> list[dict]:
     recent = history[-HISTORY_KEEP_RECENT:]
     older = history[:-HISTORY_KEEP_RECENT]
@@ -167,7 +168,13 @@ def _build_messages(
     )
 
     return [
-        {"role": "system", "content": build_system_message(web_search_enabled=web_search_enabled)},
+        {
+            "role": "system",
+            "content": build_system_message(
+                web_search_enabled=web_search_enabled,
+                persona_override=persona_override,
+            ),
+        },
         {"role": "user", "content": user_content},
     ]
 
@@ -453,6 +460,68 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
             route = None
             await broker.publish("router_failed", {"error": str(e)[:200]})
 
+        persona_override = rag_settings.get("persona")
+
+        # Short-circuit: smalltalk / greeting / identity / off-topic. Answer
+        # directly as the assistant persona — no retrieval, no escalation. This
+        # is what fixes "привет"/"кто ты" landing on an alarming 0%-confidence
+        # escalation. Mirrors Elza's casual-conversation path.
+        if route is not None and not route.needs_retrieval:
+            try:
+                answer = (await chat(
+                    [
+                        {"role": "system", "content": build_smalltalk_message(persona_override)},
+                        {"role": "user", "content": query},
+                    ],
+                    model=rag_models["llm_model"],
+                    base_url=rag_models.get("llm_base_url"),
+                    api_key=rag_models.get("llm_api_key"),
+                    provider_order=rag_models.get("llm_provider_order"),
+                    temperature=0.4,
+                    max_tokens=500,
+                )).strip()
+            except Exception as e:
+                log.warning("smalltalk answer failed: %s", e)
+                answer = (
+                    "Здравствуйте! Я — ассистент UzMRC по нормативным документам. "
+                    "Помогаю с вопросами об ипотечном рефинансировании: правила, ставки, "
+                    "требования и процедуры. Чем могу помочь?"
+                )
+
+            run.status = AgentRunStatus.succeeded
+            run.answer = answer
+            run.citations = []
+            run.confidence = 1.0
+            run.steps_used = 0
+            run.telemetry = {
+                "elapsed_sec": round(time.monotonic() - t0, 3),
+                "pool_size": 0,
+                "scratchpad_keys": [],
+                "terminated_reason": "smalltalk",
+                "prior_turns_used": len(prior_turns),
+                "router": {"kind": route.kind, "via": route.via, "confidence": route.confidence},
+            }
+            run.finished_at = datetime.now(timezone.utc)
+            await db.commit()
+
+            await broker.publish(
+                "final_answer",
+                {
+                    "step": 0, "answer": answer, "confidence": 1.0,
+                    "raw_confidence": 1.0, "citations": [], "warnings": [],
+                },
+            )
+            await broker.publish(
+                "run_finished",
+                {
+                    "status": run.status.value, "steps_used": 0,
+                    "elapsed_sec": run.telemetry["elapsed_sec"],
+                },
+            )
+            await broker.close()
+            await EventBroker.pop(run_id)
+            return
+
         recent_tool_calls: list[tuple[str, str]] = []
 
         # Pre-search: run the primary suggested tool + its companions in parallel
@@ -505,6 +574,7 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                     query, pool, history, step, max_steps, nudge,
                     route=route, prior_turns=prior_turns,
                     web_search_enabled=bool(rag_settings.get("web_search_enabled")),
+                    persona_override=persona_override,
                 )
                 nudge = None
                 try:

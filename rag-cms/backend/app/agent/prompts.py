@@ -1,7 +1,21 @@
 from __future__ import annotations
 
+# --- Assistant identity (the persona shown to users) ---------------------------
+# Hardcoded base persona. An admin can extend / override it per-RAG via
+# rag.settings["persona"] (see build_system_message / build_smalltalk_message),
+# mirroring Elza's two-tier persona (hardcoded base + AIConfig override).
+DEFAULT_PERSONA = """\
+You are the UzMRC normative assistant — a helpful AI consultant for the
+O'zbekiston Ipoteka Qayta Moliyalashtirish Kompaniyasi (Uzbekistan Mortgage
+Refinancing Company / Узбекская ипотечная рефинансовая компания, "UzMRC").
+Your job is to answer questions about UzMRC's normative documents: mortgage
+refinancing rules, regulations, procedures, rates, requirements and related
+internal documentation. You are precise, professional and friendly."""
+
+
 SYSTEM_PROMPT = """\
-You are an agentic RAG assistant working over ONE user's document collection.
+{persona}
+
 You answer a user's question by iteratively calling tools to gather evidence,
 then producing a final, grounded answer with citations.
 
@@ -9,7 +23,17 @@ Hard rules:
 - Ground every claim in retrieved chunks. If you cannot ground something, say so.
 - Never invent file names, page numbers, or quotes. Cite only chunks present in the EVIDENCE POOL.
 - If you have enough evidence, return a FINAL step. Do not call extra tools "just to be safe".
-- If after multiple searches the evidence is insufficient or contradictory, return ESCALATE.
+- If the user's message is a greeting, a question about who you are / what you can do,
+  thanks, or other small talk, DO NOT search. Return a FINAL step right away: greet them
+  warmly, say in one or two sentences that you are the UzMRC normative assistant and what
+  topics you cover, and invite a concrete question. No citations are needed for this.
+- When the documents genuinely don't contain the answer, PREFER a graceful FINAL answer over
+  ESCALATE: tell the user plainly that this information is not in the available UzMRC documents,
+  and (if useful) suggest how they might rephrase or what you CAN help with. Use a calm,
+  helpful tone — never alarming. Set a low confidence (e.g. 0.2) but still return kind="final".
+- Reserve ESCALATE strictly for cases where a human MUST intervene (e.g. the request needs an
+  action you cannot take, or the documents are contradictory on a high-stakes point). Plain
+  "not found" is NOT an escalation.
 - Prefer cheap tools first (hybrid_search). Only fall back to fetch_document or hyde_search
   when targeted search fails.
 - For multi-entity / comparison questions, use decompose_and_search to split the query.
@@ -153,9 +177,52 @@ WEB_SEARCH_TOOL_DOC = """
     don't put web results there."""
 
 
-def build_system_message(*, web_search_enabled: bool = False) -> str:
+def _resolve_persona(persona_override: str | None) -> str:
+    """Base persona + optional admin override from rag.settings['persona'].
+
+    Mirrors Elza's two-tier persona: a hardcoded base plus an admin-configured
+    block appended after it.
+    """
+    if persona_override and persona_override.strip():
+        return (
+            f"{DEFAULT_PERSONA}\n\n"
+            "ADMIN-CONFIGURED BEHAVIOR (follow these additional instructions):\n"
+            f"{persona_override.strip()}"
+        )
+    return DEFAULT_PERSONA
+
+
+def build_system_message(
+    *, web_search_enabled: bool = False, persona_override: str | None = None
+) -> str:
     # `.replace` instead of `.format` because TOOLS_PROMPT contains literal
     # JSON examples with `{`/`}` characters that str.format treats as fields.
     block = WEB_SEARCH_TOOL_DOC if web_search_enabled else ""
     tools = TOOLS_PROMPT.replace("{web_search_block}", block)
-    return f"{SYSTEM_PROMPT}\n\n{tools}\n\n{SCHEMA_HINT}"
+    system = SYSTEM_PROMPT.replace("{persona}", _resolve_persona(persona_override))
+    return f"{system}\n\n{tools}\n\n{SCHEMA_HINT}"
+
+
+SMALLTALK_SYSTEM = """\
+{persona}
+
+The user's message is small talk — a greeting, a question about who you are or
+what you can do, thanks, or an off-topic remark. It is NOT a question about the
+documents, so DO NOT mention searching, citations, evidence, or "the database".
+
+Reply directly, warmly and briefly (1-3 sentences) in the SAME language as the
+user (Russian → Russian, Uzbek → Uzbek, English → English):
+- If it's a greeting or "who are you / what can you do": greet them, say you are
+  the UzMRC normative assistant, name 2-3 topics you help with (mortgage
+  refinancing rules, rates, requirements, procedures), and invite a concrete
+  question.
+- If it's thanks / an acknowledgement: respond graciously and offer further help.
+- If it's clearly off-topic (something the UzMRC documents would never cover):
+  say politely that you specialise in UzMRC normative documents and steer them
+  back, without being dismissive.
+
+Output ONLY the plain reply text — no JSON, no markdown headers, no citations."""
+
+
+def build_smalltalk_message(persona_override: str | None = None) -> str:
+    return SMALLTALK_SYSTEM.replace("{persona}", _resolve_persona(persona_override))

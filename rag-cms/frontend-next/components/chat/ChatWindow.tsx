@@ -332,7 +332,7 @@ function RunTurn({
           <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
             <span className="font-medium text-foreground">Ассистент</span>
             <StatusBadge status={run.status} />
-            {run.confidence != null && (
+            {run.confidence != null && run.confidence > 0 && run.status !== "escalated" && (
               <span className="font-mono">уверенность {(run.confidence * 100).toFixed(0)}%</span>
             )}
             <span className="flex-1" />
@@ -357,8 +357,10 @@ function RunTurn({
           ) : running ? (
             <AgentProgress run={run} events={events} />
           ) : run.status === "escalated" ? (
-            <div className="text-sm text-amber-600">
-              Агент не нашёл достаточных оснований в базе и передал вопрос человеку.
+            <div className="text-sm text-muted-foreground">
+              В доступных документах UzMRC нет точного ответа на этот вопрос.
+              Попробуйте переформулировать или уточнить — я помогу по нормативной базе
+              (ипотечное рефинансирование: правила, ставки, требования, процедуры).
             </div>
           ) : (
             <div className="text-sm text-destructive">Ответ не получен.</div>
@@ -383,7 +385,7 @@ function StatusBadge({ status }: { status: string }) {
   };
   const label: Record<string, string> = {
     succeeded: "готово",
-    escalated: "эскалация",
+    escalated: "нет в документах",
     failed: "ошибка",
     running: "идёт",
     queued: "в очереди",

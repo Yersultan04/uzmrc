@@ -12,12 +12,17 @@ log = logging.getLogger("router")
 
 @dataclass
 class RouteDecision:
-    kind: str  # "lookup" | "multi_entity" | "aggregate" | "definition" | "free_text"
+    kind: str  # "smalltalk" | "lookup" | "multi_entity" | "aggregate" | "definition" | "free_text"
     suggested_tool: str
     suggested_args: dict
     rationale: str
     confidence: float
     via: str  # "regex" | "llm"
+    # Whether this query needs document retrieval at all. Greetings / identity /
+    # thanks / off-topic chit-chat set this False so the loop answers directly as
+    # the assistant persona instead of searching and then escalating with 0%
+    # confidence. Mirrors Elza's QueryRouter (needs_retrieval=False for casual).
+    needs_retrieval: bool = True
     # Tools to run in parallel with the primary BEFORE the agent's first step,
     # to combine precision (exact_lookup) with recall (hybrid_search). Each is
     # (tool_name, args).
@@ -54,16 +59,48 @@ _QUOTED = re.compile(
 )
 
 
+# Casual / smalltalk fast-path (ru / uz / en): greetings, identity / capability
+# questions, thanks, acknowledgements, goodbyes. These never need document
+# retrieval — the loop answers them directly as the assistant persona instead of
+# searching the corpus and then escalating with 0% confidence. Mirrors Elza's
+# _FP_CASUAL_EXACT. Whole-message match only (so "что такое первоначальный взнос"
+# is NOT caught — only bare greetings / meta).
+_SMALLTALK = re.compile(
+    r"""^\s*(
+        # — greetings —
+        привет\w*|здравствуй\w*|здаров\w*|приветствую|салам\w*|ассал\w+|салом\w*|
+        хай|хеллоу|здрасьте|
+        добр(ый|ое|ого)\s+(день|вечер|утр\w+)|
+        hi|hello|hey|yo|salom|assalom\w*|qalaysiz|
+        # — identity / capability —
+        кто\s+ты|ты\s+кто|что\s+ты(\s+(такое|за\s+\w+|умеешь|можешь|делаешь))?|
+        чем\s+(ты\s+)?(можешь\s+)?(мне\s+)?помо\w+|что\s+(ты\s+)?умеешь|
+        расскажи\s+о\s+себе|кто\s+вы|представься|
+        who\s+are\s+you|what\s+(are|can|do)\s+you\w*|sen\s+kimsan|nima\s+qila\s+olasan|
+        # — thanks / acknowledgement / bye —
+        спасибо\w*|благодар\w+|рахмат\w*|rahmat|thanks?|thank\s+you|
+        пока|до\s+свидания|до\s+встречи|bye|goodbye|
+        ок(ей)?|ok|okay|понятно|ясно|хорошо|good|nice|супер|класс
+    )\s*[!?.,…]*(\s+.{0,40})?\s*$""",
+    re.IGNORECASE | re.VERBOSE | re.UNICODE,
+)
+
+
 _ROUTE_SYSTEM = (
     "You are a query router for a RAG system over a private document collection. "
     "Classify the user query and pick the best first tool to retrieve evidence.\n\n"
     "OUTPUT JSON exactly:\n"
-    '{"kind": "lookup|multi_entity|aggregate|definition|free_text",\n'
-    ' "tool":  "hybrid_search|dense_search|sparse_search|decompose_and_search|hyde_search|exact_lookup|list_files",\n'
+    '{"kind": "smalltalk|lookup|multi_entity|aggregate|definition|free_text",\n'
+    ' "tool":  "none|hybrid_search|dense_search|sparse_search|decompose_and_search|hyde_search|exact_lookup|list_files",\n'
     ' "args":  { … tool-specific arguments … },\n'
     ' "rationale": "<one short sentence>",\n'
     ' "confidence": <0.0..1.0>}\n\n'
-    "TOOL SELECTION (read CAREFULLY):\n\n"
+    "0. smalltalk — use this (tool=\"none\") for messages that are NOT questions about "
+    "the documents: greetings (\"привет\", \"salom\"), identity/capability questions "
+    "(\"кто ты\", \"что ты умеешь\"), thanks, acknowledgements, goodbyes, or off-topic "
+    "chit-chat that the document collection could not possibly answer. These need NO "
+    "retrieval — the assistant replies directly as its persona.\n\n"
+    "TOOL SELECTION for document questions (read CAREFULLY):\n\n"
     "1. exact_lookup — ALWAYS use this when the query references something the user "
     "would EXPECT to find verbatim in the documents. Examples that should route here:\n"
     "  • specific identifier code: \"RM-2\", \"OSON-3\", \"SC-7\", \"ARB/2025\"\n"
@@ -92,14 +129,27 @@ _ROUTE_SYSTEM = (
 
 
 def _regex_route(query: str) -> RouteDecision | None:
-    """Single-purpose fast path: when the user explicitly quotes a phrase, use
-    it verbatim — that's an unambiguous signal that doesn't need an LLM call.
+    """Fast paths that don't need an LLM call:
+
+    1. Bare greeting / identity / thanks / bye → smalltalk (no retrieval).
+    2. An explicitly quoted phrase → exact_lookup verbatim.
 
     All other "looks like a literal" decisions (codes, percentages, dates,
     precise field names) are delegated to the LLM router below, which has the
     full query context and won't miss things our regex would never anticipate
     ("в районе 13 процентов", "ID начинается с RM").
     """
+    if _SMALLTALK.match(query):
+        return RouteDecision(
+            kind="smalltalk",
+            suggested_tool="none",
+            suggested_args={},
+            rationale="greeting / identity / smalltalk — answer as persona, no retrieval",
+            confidence=0.97,
+            via="regex",
+            needs_retrieval=False,
+        )
+
     qm = _QUOTED.search(query)
     if qm is not None:
         phrase = next(g for g in qm.groups() if g)
@@ -134,6 +184,19 @@ async def _llm_route(query: str) -> RouteDecision | None:
     kind = data.get("kind") or "free_text"
     tool = data.get("tool") or "hybrid_search"
     args = data.get("args") or {}
+
+    # smalltalk / off-topic → no retrieval, answer as persona.
+    if str(kind) == "smalltalk" or str(tool) == "none":
+        return RouteDecision(
+            kind="smalltalk",
+            suggested_tool="none",
+            suggested_args={},
+            rationale=str(data.get("rationale", "smalltalk / off-topic")),
+            confidence=float(data.get("confidence", 0.8)),
+            via="llm",
+            needs_retrieval=False,
+        )
+
     if tool in {"hybrid_search", "dense_search", "sparse_search", "hyde_search"} and "query" not in args:
         args["query"] = query
     if tool == "decompose_and_search" and "query" not in args:
@@ -150,7 +213,10 @@ async def _llm_route(query: str) -> RouteDecision | None:
 
 async def route_query(query: str) -> RouteDecision:
     fast = _regex_route(query)
+    # A confident regex hit (smalltalk or quoted phrase) short-circuits the LLM call.
     if fast is not None and fast.confidence >= 0.8:
+        if fast.kind == "smalltalk":
+            return fast  # no companions, no retrieval
         return _attach_companions(fast, query)
     llm = await _llm_route(query)
     if llm is not None:
