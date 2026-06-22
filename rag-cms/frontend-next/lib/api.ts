@@ -119,6 +119,16 @@ export const filesApi = {
   remove: (ragId: string, fileId: string) =>
     api.delete<void>(`/rags/${ragId}/files/${fileId}`).then((r) => r.data),
 
+  /** Classify all files into doc_type via LLM. Returns counts by type. */
+  classify: (ragId: string, onlyMissing = false) =>
+    api
+      .post<{ classified: number; by_type: Record<string, number> }>(
+        `/rags/${ragId}/files/classify`,
+        null,
+        { params: { only_missing: onlyMissing } },
+      )
+      .then((r) => r.data),
+
   /** Upload one file (multipart, field name `files`). Reports progress. */
   upload: (
     ragId: string,

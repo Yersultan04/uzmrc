@@ -112,9 +112,24 @@ export interface FileItem {
   size_bytes: number;
   pages: number | null;
   status: FileStatus;
+  doc_type: string | null;
   error: string | null;
   created_at: string;
 }
+
+// Document type taxonomy (key → Russian label). Mirrors backend
+// app/ingestion/classify.py DOC_TYPES.
+export const DOC_TYPES: Record<string, string> = {
+  normative: "Нормативные документы",
+  report: "Отчёты",
+  analytics: "Аналитика рынка",
+  press: "Новости и пресс-релизы",
+  issuance: "Эмиссия и инвесторам",
+  certificate: "Сертификаты",
+  business_plan: "Бизнес-планы",
+  about: "О компании",
+  other: "Прочее",
+};
 
 // ---------------- ingest ----------------
 

@@ -20,6 +20,7 @@ import {
   RotateCcw,
   Settings,
   ShieldAlert,
+  Sparkles,
   Trash2,
   Upload,
   UserPlus,
@@ -35,6 +36,7 @@ import type {
   Rag,
   RagStats,
 } from "@/lib/types";
+import { DOC_TYPES } from "@/lib/types";
 import { AppShell } from "@/components/AppShell";
 import {
   FileStatusBadge,
@@ -276,6 +278,8 @@ function FilesTab({ ragId, canManage }: { ragId: string; canManage: boolean }) {
   const [files, setFiles] = useState<FileItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState<string>("");
+  const [classifying, setClassifying] = useState(false);
   const [uploads, setUploads] = useState<
     { name: string; progress: number; error?: string }[]
   >([]);
@@ -299,12 +303,36 @@ function FilesTab({ ragId, canManage }: { ragId: string; canManage: boolean }) {
   }, [refresh]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  // Which doc types actually occur, for the filter dropdown.
+  const presentTypes = useMemo(() => {
+    const s = new Set<string>();
+    for (const f of files) if (f.doc_type) s.add(f.doc_type);
+    return Object.keys(DOC_TYPES).filter((k) => s.has(k));
+  }, [files]);
+
+  const classified = useMemo(() => files.some((f) => f.doc_type), [files]);
+
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return q
-      ? files.filter((f) => f.filename.toLowerCase().includes(q))
-      : files;
-  }, [files, filter]);
+    return files.filter(
+      (f) =>
+        (!q || f.filename.toLowerCase().includes(q)) &&
+        (!typeFilter || f.doc_type === typeFilter),
+    );
+  }, [files, filter, typeFilter]);
+
+  async function onClassify() {
+    setClassifying(true);
+    try {
+      const res = await filesApi.classify(ragId);
+      toast.success(`Классифицировано: ${res.classified} файлов`);
+      await refresh();
+    } catch (e) {
+      toast.error((e as Error).message || "Не удалось классифицировать");
+    } finally {
+      setClassifying(false);
+    }
+  }
 
   async function handleFiles(picked: File[]) {
     if (picked.length === 0) return;
@@ -411,18 +439,42 @@ function FilesTab({ ragId, canManage }: { ragId: string; canManage: boolean }) {
         </div>
       )}
 
-      <div className="flex items-center justify-between gap-3">
-        <Input
-          placeholder="Поиск по имени файла…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="max-w-xs"
-        />
-        <span className="text-xs text-muted-foreground">
-          {filter
-            ? `${visible.length} из ${files.length}`
-            : `${files.length} файл(ов)`}
-        </span>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            placeholder="Поиск по имени файла…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="max-w-xs"
+          />
+          {presentTypes.length > 0 && (
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="h-9 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring"
+            >
+              <option value="">Все типы</option>
+              {presentTypes.map((k) => (
+                <option key={k} value={k}>
+                  {DOC_TYPES[k]}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">
+            {filter || typeFilter
+              ? `${visible.length} из ${files.length}`
+              : `${files.length} файл(ов)`}
+          </span>
+          {canManage && files.length > 0 && (
+            <Button variant="outline" size="sm" onClick={onClassify} disabled={classifying}>
+              {classifying ? <Loader2 className="animate-spin" /> : <Sparkles />}
+              {classified ? "Переклассифицировать" : "Классифицировать"}
+            </Button>
+          )}
+        </div>
       </div>
 
       {loading ? (
@@ -459,7 +511,14 @@ function FilesTab({ ragId, canManage }: { ragId: string; canManage: boolean }) {
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
                       <div className="min-w-0">
-                        <div className="truncate font-medium">{f.filename}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="truncate font-medium">{f.filename}</span>
+                          {f.doc_type && (
+                            <Badge variant="secondary" className="shrink-0 font-normal">
+                              {DOC_TYPES[f.doc_type] ?? f.doc_type}
+                            </Badge>
+                          )}
+                        </div>
                         {f.error && (
                           <div className="truncate text-xs text-destructive">
                             {f.error}

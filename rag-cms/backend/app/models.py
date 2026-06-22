@@ -170,6 +170,9 @@ class File(Base):
     status: Mapped[FileStatus] = mapped_column(
         Enum(FileStatus, name="file_status"), default=FileStatus.uploaded, nullable=False
     )
+    # Document category (normative / report / analytics / press / issuance /
+    # certificate / business_plan / about / other). Set by the LLM classifier.
+    doc_type: Mapped[str | None] = mapped_column(String(32), index=True)
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

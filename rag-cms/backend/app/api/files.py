@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import uuid
 from pathlib import Path
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_accessible_rag, get_owned_rag
 from app.config import get_settings
 from app.db import get_db
+from app.ingestion.classify import classify_document
+from app.models import Chunk
 from app.models import File as FileModel
 from app.models import FileStatus, Rag
 from app.schemas import FileOut
@@ -96,6 +99,59 @@ async def list_files(
         select(FileModel).where(FileModel.rag_id == rag.id).order_by(FileModel.created_at.desc())
     )
     return list(res.scalars().all())
+
+
+@router.post("/{rag_id}/files/classify")
+async def classify_files(
+    rag: Rag = Depends(get_owned_rag),
+    db: AsyncSession = Depends(get_db),
+    only_missing: bool = False,
+) -> dict:
+    """Owner-only. Classify each file into a doc_type via a cheap LLM, using the
+    filename + a short text excerpt. Concurrency-safe: all DB reads happen first,
+    LLM calls run concurrently, then results are written back in one pass.
+    """
+    s = get_settings()
+    if not s.openrouter_api_key:
+        raise HTTPException(400, "OPENROUTER_API_KEY not configured")
+
+    q = select(FileModel).where(FileModel.rag_id == rag.id)
+    if only_missing:
+        q = q.where(FileModel.doc_type.is_(None))
+    files = list((await db.execute(q)).scalars().all())
+    if not files:
+        return {"classified": 0, "by_type": {}}
+
+    # One query: first two chunks' text per file (for a representative excerpt).
+    samples: dict[uuid.UUID, str] = {}
+    rows = (await db.execute(
+        select(Chunk.file_id, Chunk.text)
+        .where(Chunk.rag_id == rag.id, Chunk.chunk_index < 2)
+        .order_by(Chunk.file_id, Chunk.chunk_index)
+    )).all()
+    for fid, text in rows:
+        samples[fid] = (samples.get(fid, "") + " " + (text or ""))[:1800]
+
+    model = "openai/gpt-4o-mini"
+    base = s.openrouter_base_url
+    key = s.openrouter_api_key
+    sem = asyncio.Semaphore(8)
+
+    async def _one(f: FileModel) -> tuple[FileModel, str]:
+        async with sem:
+            t = await classify_document(
+                f.filename, samples.get(f.id, ""),
+                model=model, base_url=base, api_key=key,
+            )
+            return f, t
+
+    results = await asyncio.gather(*[_one(f) for f in files])
+    by_type: dict[str, int] = {}
+    for f, t in results:
+        f.doc_type = t
+        by_type[t] = by_type.get(t, 0) + 1
+    await db.commit()
+    return {"classified": len(results), "by_type": by_type}
 
 
 @router.get("/{rag_id}/files/{file_id}/blob")

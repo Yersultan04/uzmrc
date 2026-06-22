@@ -103,6 +103,7 @@ class FileOut(BaseModel):
     size_bytes: int
     pages: int | None
     status: FileStatus
+    doc_type: str | None = None
     error: str | None
     created_at: datetime
 
