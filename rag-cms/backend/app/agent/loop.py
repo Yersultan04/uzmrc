@@ -502,14 +502,22 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
         # keeping the visible answer high-quality. When the two models are the same,
         # we skip the extra synthesis call (no-op hybrid).
         s = get_settings()
-        step_model = s.llm_model
-        step_base = s.llm_api_base_url
-        step_key = s.llm_api_key
+        # Fast loop model runs on OpenRouter (paid — no Cerebras free-tier 429/backoff).
+        step_model = s.agent_step_model
+        step_base = s.openrouter_base_url
+        step_key = s.openrouter_api_key
         final_model = rag_models["llm_model"]
         final_base = rag_models.get("llm_base_url")
         final_key = rag_models.get("llm_api_key")
         final_porder = rag_models.get("llm_provider_order")
-        hybrid = bool(step_model) and final_model != step_model
+        # Hybrid only when a fast step model is set, it differs from the final model,
+        # and we actually have an OpenRouter key to run it.
+        hybrid = bool(step_model and step_key) and final_model != step_model
+        if not hybrid:
+            # Fall back to the RAG's own model for the loop too.
+            step_model = final_model
+            step_base = final_base
+            step_key = final_key
 
         ctx = AgentContext(
             rag_id=rag.id, db=db, user_query=query, pool_ref=pool,
