@@ -38,8 +38,8 @@ from app.presets import resolve_models_for_rag
 
 log = logging.getLogger("agent")
 
-DEFAULT_MAX_STEPS = 14  # 50-doc corpus rarely needs >5 steps; cap worst-case latency
-                        # (was 40 — let runs wander into 2-3 min before budget_exhausted)
+DEFAULT_MAX_STEPS = 8   # corpus questions rarely need >4 steps once pre-search seeds the
+                        # pool; cap worst-case latency (was 14 — let runs wander to ~60-90s)
 HISTORY_KEEP_RECENT = 6
 POOL_PROMPT_CAP = 12  # how many pool entries shown in the prompt at once
 POOL_TEXT_CAP_CHARS = 700  # truncate each entry's text in the prompt

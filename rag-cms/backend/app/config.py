@@ -55,12 +55,14 @@ class Settings(BaseSettings):
     llm_model: str = "openai/gpt-4o-mini"
     llm_rerank_model: str = "openai/gpt-4o-mini"
 
-    # Hybrid speed: the iterative agent loop (tool selection / search) and smalltalk
-    # run on this FAST model via OpenRouter, while the final user-visible answer is
-    # synthesized with the RAG's quality model (e.g. gpt-5.4). Runs on OpenRouter
-    # (paid, no hard free-tier RPM) to avoid the Cerebras free-tier 429 + 59s backoff
-    # that stalls multi-step runs. Empty → hybrid disabled (loop uses the RAG model).
-    agent_step_model: str = "openai/gpt-4o-mini"
+    # Hybrid speed: when set, the iterative agent loop + smalltalk run on this FAST
+    # model via OpenRouter, and only the final answer is synthesized with the RAG's
+    # quality model. Worth it ONLY when the RAG model is a slow reasoning model
+    # (e.g. gpt-5.4 ~70s/answer) — it avoids paying that latency on every step.
+    # When the RAG model is already fast (e.g. gpt-4o), keep this EMPTY: running the
+    # whole loop on the one fast model avoids a wasteful double generation
+    # (draft + synthesis). Runs on OpenRouter (no Cerebras free-tier 429 stalls).
+    agent_step_model: str = ""
 
     # Optional per-role overrides — when set, that role uses its own endpoint
     # instead of the default openrouter_* pair. Useful for on-prem deployments
