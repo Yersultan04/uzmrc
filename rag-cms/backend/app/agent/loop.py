@@ -14,6 +14,7 @@ from sqlalchemy import select
 from app.agent.events import EventBroker
 from app.agent.grounding import ground_citations
 from app.agent.prompts import (
+    _resolve_persona,
     build_admin_instructions,
     build_smalltalk_message,
     build_system_message,
@@ -312,6 +313,66 @@ async def _call_llm_for_step(
     raise last_err
 
 
+_SYNTH_RULES = (
+    "Rewrite the FINAL answer for the user. Rules:\n"
+    "- Ground every claim ONLY in the EVIDENCE below — never invent facts or citations.\n"
+    "- Be exhaustive but precise; surface every relevant figure, date, name and condition.\n"
+    "- Structure with Markdown (## headings, bullet/numbered lists, tables for comparisons,\n"
+    "  > blockquotes for verbatim excerpts, **bold** for key terms, `code` for identifiers).\n"
+    "- Put an inline [N] marker after each factual claim, where N matches the EVIDENCE\n"
+    "  numbering. Use ONLY [N] form; multiple like [1][2] are fine.\n"
+    "- Write the ENTIRE answer in the user's language; never mix languages (a verbatim quote\n"
+    "  may stay in the source language, but your prose around it must be the user's language).\n"
+    "- Do NOT add a 'Sources:'/'Источники:' list — citations render from the [N] markers.\n"
+    "- Output ONLY the answer text (Markdown). No JSON, no preamble."
+)
+
+
+async def _synthesize_final_answer(
+    query: str,
+    pool: list[PoolEntry],
+    draft: str,
+    citations: list[Citation],
+    *,
+    persona_override: str | None,
+    model: str,
+    base_url: str | None,
+    api_key: str | None,
+    provider_order: list[str] | None,
+) -> str:
+    """Polish the final answer with the quality model, reusing the citation set the
+    (fast) loop already validated. Returns the rewritten Markdown answer text.
+    Falls back to the draft on any error (handled by the caller).
+    """
+    by_id = {p.chunk_id: p for p in pool}
+    ev_lines: list[str] = []
+    for i, c in enumerate(citations, 1):
+        p = by_id.get(c.chunk_id)
+        text = ((p.text if p else c.quote) or "").strip().replace("\n", " ")
+        if len(text) > 800:
+            text = text[:799] + "…"
+        page = f"стр. {c.page_start}" if c.page_start else ""
+        ev_lines.append(f"[{i}] (файл: {c.filename}{', ' + page if page else ''}) {text}")
+    evidence = "\n".join(ev_lines) if ev_lines else "(нет цитат)"
+
+    system = _resolve_persona(persona_override)
+    user = (
+        f"USER QUESTION:\n{query}\n\n"
+        f"EVIDENCE (numbered — cite with these exact [N] markers):\n{evidence}\n\n"
+        f"DRAFT ANSWER (from a faster model — may be rough, improve it):\n{draft}\n\n"
+        f"{_SYNTH_RULES}"
+    )
+    return (await chat(
+        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        model=model,
+        temperature=0.2,
+        max_tokens=4000,
+        base_url=base_url,
+        api_key=api_key,
+        provider_order=provider_order,
+    )).strip()
+
+
 async def _summarise_turns(turns: list[tuple[str, str]], previous_summary: str | None) -> str:
     """Roll older Q/A turns into a compact running summary.
 
@@ -433,6 +494,23 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
         pool: list[PoolEntry] = []
         rag_settings = dict(rag.settings or {})
         rag_models = resolve_models_for_rag(rag)
+
+        # Hybrid speed: drive the iterative agent loop (tool selection / search) with a
+        # FAST model (the env default — e.g. Cerebras gpt-oss-120b, ~5-10x faster), and
+        # synthesize ONLY the final user-visible answer with the RAG's quality model
+        # (e.g. gpt-5.4). Steps dominate latency, so this cuts wall-clock a lot while
+        # keeping the visible answer high-quality. When the two models are the same,
+        # we skip the extra synthesis call (no-op hybrid).
+        s = get_settings()
+        step_model = s.llm_model
+        step_base = s.llm_api_base_url
+        step_key = s.llm_api_key
+        final_model = rag_models["llm_model"]
+        final_base = rag_models.get("llm_base_url")
+        final_key = rag_models.get("llm_api_key")
+        final_porder = rag_models.get("llm_provider_order")
+        hybrid = bool(step_model) and final_model != step_model
+
         ctx = AgentContext(
             rag_id=rag.id, db=db, user_query=query, pool_ref=pool,
             rag_settings=rag_settings,
@@ -512,15 +590,16 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
         # escalation. Mirrors Elza's casual-conversation path.
         if route is not None and not route.needs_retrieval:
             try:
+                # Greetings don't need the heavy model — use the fast step model.
                 answer = (await chat(
                     [
                         {"role": "system", "content": build_smalltalk_message(persona_override)},
                         {"role": "user", "content": query},
                     ],
-                    model=rag_models["llm_model"],
-                    base_url=rag_models.get("llm_base_url"),
-                    api_key=rag_models.get("llm_api_key"),
-                    provider_order=rag_models.get("llm_provider_order"),
+                    model=step_model,
+                    base_url=step_base,
+                    api_key=step_key,
+                    provider_order=None,
                     temperature=0.4,
                     max_tokens=500,
                 )).strip()
@@ -624,10 +703,10 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                 try:
                     envelope = await _call_llm_for_step(
                         messages, step, broker,
-                        llm_model=rag_models["llm_model"],
-                        base_url=rag_models.get("llm_base_url"),
-                        api_key=rag_models.get("llm_api_key"),
-                        provider_order=rag_models.get("llm_provider_order"),
+                        llm_model=step_model,
+                        base_url=step_base,
+                        api_key=step_key,
+                        provider_order=None,
                     )
                 except Exception as e:
                     history.append(
@@ -684,9 +763,28 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                             ],
                         },
                     )
+                    # Hybrid: re-synthesise the user-visible prose once with the
+                    # quality model, keeping the validated citation set. The fast
+                    # model already did the retrieval work; this only polishes the
+                    # final answer's wording/structure.
+                    answer_text = next_step.answer
+                    if hybrid:
+                        try:
+                            answer_text = await _synthesize_final_answer(
+                                query, pool, next_step.answer, valid_cites,
+                                persona_override=persona_override,
+                                model=final_model, base_url=final_base,
+                                api_key=final_key, provider_order=final_porder,
+                            )
+                            await broker.publish(
+                                "final_synthesized", {"step": step, "model": final_model},
+                            )
+                        except Exception as e:
+                            log.warning("final synthesis failed, using draft: %s", e)
+
                     final_obj = FinalAnswer(
                         thought=next_step.thought,
-                        answer=next_step.answer,
+                        answer=answer_text,
                         citations=valid_cites,
                         confidence=report.adjusted_confidence,
                     )
