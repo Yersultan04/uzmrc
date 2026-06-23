@@ -88,12 +88,43 @@ async def _chunks_to_pool(rows: list[Chunk]) -> list[PoolEntry]:
 
 # ---------------- core search tools ----------------
 
+PER_FILE_CAP = 3  # max chunks from one document in a single search result, so a
+                  # broad/vague query doesn't fill the whole pool from one big file
+
+
+def _diversify_by_file(
+    pairs: list[tuple[Chunk, Any]], top_k: int, per_file_cap: int = PER_FILE_CAP
+) -> list[tuple[Chunk, Any]]:
+    """Source diversity for retrieval. ``pairs`` are score-sorted (chunk, hit).
+    Keep at most ``per_file_cap`` chunks per file in the primary slate so several
+    documents surface for a broad query; only backfill from over-cap chunks
+    (still score-ordered) when there aren't enough distinct files to reach
+    ``top_k``. Specific queries where one document holds the answer are
+    unaffected — its top chunks stay; the rest just move below other docs.
+    """
+    primary: list[tuple[Chunk, Any]] = []
+    overflow: list[tuple[Chunk, Any]] = []
+    per_file: dict[uuid.UUID, int] = {}
+    for c, fh in pairs:
+        if per_file.get(c.file_id, 0) < per_file_cap:
+            primary.append((c, fh))
+            per_file[c.file_id] = per_file.get(c.file_id, 0) + 1
+        else:
+            overflow.append((c, fh))
+    if len(primary) < top_k:
+        primary.extend(overflow[: top_k - len(primary)])
+    return primary[:top_k]
+
 
 @tool("hybrid_search")
 async def hybrid_search_tool(ctx: AgentContext, args: dict) -> ToolResult:
     query = _require_str(args, "query")
     top_k = _opt_int(args, "top_k", 10, 1, 50)
-    pairs = await hybrid_search(ctx.db, ctx.rag_id, query, top_k=top_k, mode="hybrid")
+    # Fetch a deeper candidate set than requested, then diversify down to top_k
+    # so one document can't sweep the whole result for a vague query.
+    fetch_k = min(50, max(top_k * 3, 15))
+    pairs = await hybrid_search(ctx.db, ctx.rag_id, query, top_k=fetch_k, mode="hybrid")
+    pairs = _diversify_by_file(pairs, top_k)
     pool = [
         PoolEntry(
             chunk_id=c.id,
@@ -114,7 +145,9 @@ async def hybrid_search_tool(ctx: AgentContext, args: dict) -> ToolResult:
 async def dense_search_tool(ctx: AgentContext, args: dict) -> ToolResult:
     query = _require_str(args, "query")
     top_k = _opt_int(args, "top_k", 10, 1, 50)
-    pairs = await hybrid_search(ctx.db, ctx.rag_id, query, top_k=top_k, mode="dense")
+    fetch_k = min(50, max(top_k * 3, 15))
+    pairs = await hybrid_search(ctx.db, ctx.rag_id, query, top_k=fetch_k, mode="dense")
+    pairs = _diversify_by_file(pairs, top_k)
     pool = [
         PoolEntry(
             chunk_id=c.id, file_id=c.file_id, filename=c.file.filename if c.file else "",
@@ -130,7 +163,9 @@ async def dense_search_tool(ctx: AgentContext, args: dict) -> ToolResult:
 async def sparse_search_tool(ctx: AgentContext, args: dict) -> ToolResult:
     query = _require_str(args, "query")
     top_k = _opt_int(args, "top_k", 10, 1, 50)
-    pairs = await hybrid_search(ctx.db, ctx.rag_id, query, top_k=top_k, mode="sparse")
+    fetch_k = min(50, max(top_k * 3, 15))
+    pairs = await hybrid_search(ctx.db, ctx.rag_id, query, top_k=fetch_k, mode="sparse")
+    pairs = _diversify_by_file(pairs, top_k)
     pool = [
         PoolEntry(
             chunk_id=c.id, file_id=c.file_id, filename=c.file.filename if c.file else "",

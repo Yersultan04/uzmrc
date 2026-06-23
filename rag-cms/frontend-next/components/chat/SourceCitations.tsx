@@ -14,7 +14,12 @@ interface Props {
 
 function pageLabel(start: number | null, end: number | null): string | null {
   if (start == null) return null;
-  return end != null && end !== start ? `стр. ${start}–${end}` : `стр. ${start}`;
+  // The corpus is ingested from .txt/.html with no real pagination — every chunk
+  // is "page 1", so showing "стр. 1" everywhere is misleading noise. Only surface
+  // a page when it actually carries information: a real range, or a later page.
+  if (end != null && end !== start) return `стр. ${start}–${end}`;
+  if (start > 1) return `стр. ${start}`;
+  return null;
 }
 
 export function SourceCitations({ citations, onSelect }: Props) {
