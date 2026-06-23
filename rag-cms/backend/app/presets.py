@@ -173,15 +173,28 @@ def resolve_models_for_rag(rag) -> dict:
             "embed_api_key": s.embed_api_key,
             "llm_provider_order": None,
         }
+    # Provider routing for the chat/synthesis model:
+    #  * snapshot WITH an explicit llm_base_url → a direct OpenAI-compatible host
+    #    (Cerebras/Groq/Ollama/…); pair it with the snapshot key or LLM_API_KEY env.
+    #  * snapshot WITHOUT a base_url → the preset declared llm_base_url=None, which
+    #    per its docstring means "managed OpenRouter". Route to OpenRouter with the
+    #    OpenRouter key.
+    # Previously this fell back to s.llm_api_base_url (Cerebras), so cloud-preset
+    # models like openai/gpt-5.4 were sent to a host that doesn't serve them → 404
+    # and an empty answer. The OpenRouter fallback restores the documented intent.
+    snap_base = snap.get("llm_base_url")
+    if snap_base:
+        llm_base = snap_base
+        llm_key = snap.get("llm_api_key") or s.llm_api_key
+    else:
+        llm_base = s.openrouter_base_url
+        llm_key = snap.get("llm_api_key") or s.openrouter_api_key
     return {
         "llm_model": snap.get("llm_model", s.llm_model),
         "llm_rerank_model": snap.get("llm_rerank_model", s.llm_rerank_model),
         "llm_vision_model": snap.get("llm_vision_model", s.llm_vision_model),
-        "llm_base_url": snap.get("llm_base_url") or s.llm_api_base_url,
-        # If snapshot specifies a base_url but no key, look up the *snapshot's* key
-        # first, then fall back to LLM_API_KEY env. (Don't fall back to openrouter
-        # key — that's a different provider altogether.)
-        "llm_api_key": snap.get("llm_api_key") or s.llm_api_key,
+        "llm_base_url": llm_base,
+        "llm_api_key": llm_key,
         "embed_provider": snap.get("embed_provider", "voyage"),
         "embed_model": snap.get("embed_model", s.voyage_embed_model),
         "embed_dim": snap.get("embed_dim", s.voyage_embed_dim),

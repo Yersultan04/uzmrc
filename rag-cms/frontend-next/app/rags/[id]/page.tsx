@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Bot,
+  ExternalLink,
   FileText,
   GitCompare,
   Info,
@@ -285,6 +286,7 @@ function FilesTab({ ragId, canManage }: { ragId: string; canManage: boolean }) {
   >([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [openingId, setOpeningId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -369,6 +371,22 @@ function FilesTab({ ragId, canManage }: { ragId: string; canManage: boolean }) {
       await refresh();
     } catch (e) {
       toast.error((e as Error).message || "Не удалось удалить файл");
+    }
+  }
+
+  // Open the original file blob in a new tab (PDF inline / text inline).
+  async function onOpen(file: FileItem) {
+    setOpeningId(file.id);
+    try {
+      const { url } = await filesApi.fetchBlob(ragId, file.id);
+      const w = window.open(url, "_blank", "noopener,noreferrer");
+      if (!w) toast.error("Разрешите всплывающие окна, чтобы открыть файл");
+      // Revoke once the new tab has had time to load the blob.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      toast.error((e as Error).message || "Не удалось открыть файл");
+    } finally {
+      setOpeningId(null);
     }
   }
 
@@ -498,7 +516,7 @@ function FilesTab({ ragId, canManage }: { ragId: string; canManage: boolean }) {
                 <th className="px-4 py-2.5 font-medium">Статус</th>
                 <th className="px-4 py-2.5 font-medium">Размер</th>
                 <th className="px-4 py-2.5 font-medium">Страниц</th>
-                {canManage && <th className="px-4 py-2.5" />}
+                <th className="px-4 py-2.5" />
               </tr>
             </thead>
             <tbody>
@@ -536,19 +554,35 @@ function FilesTab({ ragId, canManage }: { ragId: string; canManage: boolean }) {
                   <td className="px-4 py-2.5 text-muted-foreground">
                     {f.pages ?? "—"}
                   </td>
-                  {canManage && (
-                    <td className="px-4 py-2.5 text-right">
+                  <td className="px-4 py-2.5 text-right">
+                    <div className="flex items-center justify-end gap-1">
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        onClick={() => onDelete(f)}
-                        title="Удалить файл"
-                        aria-label={`Удалить ${f.filename}`}
+                        onClick={() => onOpen(f)}
+                        disabled={openingId === f.id}
+                        title="Открыть файл"
+                        aria-label={`Открыть ${f.filename}`}
                       >
-                        <Trash2 className="text-muted-foreground" />
+                        {openingId === f.id ? (
+                          <Loader2 className="animate-spin text-muted-foreground" />
+                        ) : (
+                          <ExternalLink className="text-muted-foreground" />
+                        )}
                       </Button>
-                    </td>
-                  )}
+                      {canManage && (
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => onDelete(f)}
+                          title="Удалить файл"
+                          aria-label={`Удалить ${f.filename}`}
+                        >
+                          <Trash2 className="text-muted-foreground" />
+                        </Button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

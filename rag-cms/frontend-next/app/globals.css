@@ -271,6 +271,33 @@
 }
 .message-content tr:nth-child(even) td { background: #f9fafb; }
 
+/* Dark theme readability — markdown text must follow the theme foreground,
+   otherwise hardcoded #111827/#374151 renders near-invisible on the dark card. */
+.dark .message-content,
+.dark .message-content p,
+.dark .message-content li,
+.dark .message-content h1,
+.dark .message-content h2,
+.dark .message-content h3,
+.dark .message-content strong { color: var(--foreground); }
+.dark .message-content blockquote { color: var(--muted-foreground); }
+.dark .message-content code:not(pre code) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #9ece6a;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+.dark .message-content th {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--foreground);
+  border-color: var(--border);
+}
+.dark .message-content td {
+  color: var(--foreground);
+  border-color: var(--border);
+}
+.dark .message-content tr:nth-child(even) td { background: rgba(255, 255, 255, 0.03); }
+.dark .message-content hr { border-top-color: var(--border); }
+
 /* KaTeX math */
 .message-content .katex-display {
   margin: 10px 0;
