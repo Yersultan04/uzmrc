@@ -347,9 +347,6 @@ function RunTurn({
           <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
             <span className="font-medium text-foreground">Ассистент</span>
             <StatusBadge status={run.status} />
-            {run.confidence != null && run.confidence > 0 && run.status !== "escalated" && (
-              <span className="font-mono">уверенность {(run.confidence * 100).toFixed(0)}%</span>
-            )}
             <span className="flex-1" />
             {run.answer && (
               <button
