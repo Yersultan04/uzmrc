@@ -515,10 +515,12 @@ _SINGLE_PASS_RULES = (
     "  quote may stay in the source language).\n"
     "- If the evidence does NOT answer the question, say so plainly and set a low\n"
     "  confidence — do NOT fabricate.\n"
+    "- CITE using the [N] NUMBER shown at the start of each EVIDENCE POOL entry\n"
+    "  (e.g. [1], [2]). Cite EVERY factual claim. Prefer multiple distinct sources.\n"
     "Return ONE JSON object EXACTLY:\n"
-    '{"answer": "<markdown answer>", '
-    '"citations": [{"chunk_id": "<uuid copied verbatim from the pool>", '
-    '"quote": "<short verbatim snippet>"}], '
+    '{"answer": "<markdown answer with inline [N] markers>", '
+    '"citations": [{"n": <the pool number N>, '
+    '"quote": "<short verbatim snippet from that entry>"}], '
     '"confidence": <float 0..1>}'
 )
 
@@ -567,10 +569,16 @@ async def _single_pass_answer(
             continue
         quote = str(c.get("quote") or "")
         p: PoolEntry | None = None
-        try:
-            p = by_id.get(uuid.UUID(str(c.get("chunk_id"))))
-        except (ValueError, TypeError, AttributeError):
-            p = None
+        # Primary: 1-based pool index N (reliable — the model just copies a number).
+        n = c.get("n")
+        if isinstance(n, (int, float)) and 1 <= int(n) <= len(pool):
+            p = pool[int(n) - 1]
+        # Fallbacks: explicit chunk_id, then quote text match.
+        if p is None:
+            try:
+                p = by_id.get(uuid.UUID(str(c.get("chunk_id"))))
+            except (ValueError, TypeError, AttributeError):
+                p = None
         if p is None:
             p = _match_quote(quote, pool)
         if p is None or p.chunk_id in seen:
