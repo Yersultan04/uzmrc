@@ -82,6 +82,14 @@ function KnowledgeBases() {
     void refresh();
   }, [refresh]);
 
+  // Regular users get a chat-only experience — never the base-management list.
+  // Once their bases load, bounce them straight into the chat of the first one.
+  useEffect(() => {
+    if (loading || !user || user.role === "admin") return;
+    const target = rags.find((r) => r.status === "ready") ?? rags[0];
+    if (target) router.replace(`/rags/${target.id}/chat`);
+  }, [loading, user, rags, router]);
+
   const counts = useMemo(() => {
     return {
       total: rags.length,
