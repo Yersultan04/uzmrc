@@ -13,7 +13,7 @@
 // aborted on unmount. A 2s fallback poll re-fetches the active session while a run
 // is still non-terminal (SSE can drop silently behind a proxy).
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Copy, Loader2, Send, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { agentApi, sse } from "@/lib/api";
@@ -308,6 +308,21 @@ function RunTurn({
 }) {
   const running = !TERMINAL.has(run.status);
 
+  // Live answer text streamed token-by-token (ephemeral `answer_token` events).
+  // Shown while the run is still in flight and the persisted answer hasn't loaded
+  // yet, so the user sees the answer build up instead of waiting for the whole
+  // synthesis to finish.
+  const streamingText = useMemo(() => {
+    let s = "";
+    for (const ev of events) {
+      if (ev.type === "answer_token") {
+        const d = (ev.payload as { delta?: string }).delta;
+        if (typeof d === "string") s += d;
+      }
+    }
+    return s;
+  }, [events]);
+
   function copyAnswer() {
     if (!run.answer) return;
     void navigator.clipboard.writeText(run.answer);
@@ -354,6 +369,11 @@ function RunTurn({
               citations={run.citations}
               onCitationClick={(c) => onPreview(c)}
             />
+          ) : running && streamingText ? (
+            <div>
+              <MessageBubble text={streamingText} citations={[]} onCitationClick={() => {}} />
+              <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse rounded-sm bg-primary/60 align-middle" />
+            </div>
           ) : running ? (
             <AgentProgress run={run} events={events} />
           ) : run.status === "escalated" ? (

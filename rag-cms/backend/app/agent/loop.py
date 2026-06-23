@@ -7,7 +7,7 @@ import re
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from pydantic import ValidationError
 from sqlalchemy import select
@@ -31,7 +31,7 @@ from app.agent.schemas import (
     ToolCall,
 )
 from app.agent.tools import AgentContext, ToolResult, dispatch
-from app.clients.llm import chat
+from app.clients.llm import chat, chat_stream
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import AgentRun, AgentRunStatus, ChatSession, Rag
@@ -398,6 +398,7 @@ async def _synthesize_final_answer(
     base_url: str | None,
     api_key: str | None,
     provider_order: list[str] | None,
+    on_delta: Callable[[str], Awaitable[None]] | None = None,
 ) -> str:
     """Polish the final answer with the quality model, reusing the citation set the
     (fast) loop already validated. Returns the rewritten Markdown answer text.
@@ -421,8 +422,25 @@ async def _synthesize_final_answer(
         f"DRAFT ANSWER (from a faster model — may be rough, improve it):\n{draft}\n\n"
         f"{_SYNTH_RULES}"
     )
+    msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    if on_delta is not None:
+        # Stream the answer token-by-token so the UI renders it live instead of
+        # waiting for the whole (slow quality-model) synthesis to finish.
+        parts: list[str] = []
+        async for piece in chat_stream(
+            msgs,
+            model=model,
+            temperature=0.2,
+            max_tokens=4000,
+            base_url=base_url,
+            api_key=api_key,
+            provider_order=provider_order,
+        ):
+            parts.append(piece)
+            await on_delta(piece)
+        return "".join(parts).strip()
     return (await chat(
-        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        msgs,
         model=model,
         temperature=0.2,
         max_tokens=4000,
@@ -890,12 +908,35 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                     answer_text = next_step.answer
                     if hybrid:
                         try:
+                            # Stream the synthesized answer to the UI live. Token
+                            # deltas are batched (~24 chars) and sent as ephemeral
+                            # (non-persisted) events so they don't bloat the log.
+                            await broker.publish("answer_start", {"step": step})
+                            _buf = {"s": ""}
+
+                            async def _emit(piece: str, _buf=_buf) -> None:
+                                _buf["s"] += piece
+                                if len(_buf["s"]) >= 24 or piece.endswith("\n"):
+                                    await broker.publish(
+                                        "answer_token",
+                                        {"step": step, "delta": _buf["s"]},
+                                        persist=False,
+                                    )
+                                    _buf["s"] = ""
+
                             answer_text = await _synthesize_final_answer(
                                 query, pool, next_step.answer, valid_cites,
                                 persona_override=persona_override,
                                 model=final_model, base_url=final_base,
                                 api_key=final_key, provider_order=final_porder,
+                                on_delta=_emit,
                             )
+                            if _buf["s"]:
+                                await broker.publish(
+                                    "answer_token",
+                                    {"step": step, "delta": _buf["s"]},
+                                    persist=False,
+                                )
                             await broker.publish(
                                 "final_synthesized", {"step": step, "model": final_model},
                             )

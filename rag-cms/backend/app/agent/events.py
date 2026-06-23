@@ -55,7 +55,16 @@ class EventBroker:
         async with cls._lock:
             cls._brokers.pop(run_id, None)
 
-    async def publish(self, event_type: str, payload: dict[str, Any]) -> None:
+    async def publish(
+        self, event_type: str, payload: dict[str, Any], *, persist: bool = True
+    ) -> None:
+        """Append to the JSONL log (when ``persist``) and fan out to subscribers.
+
+        ``persist=False`` is for high-frequency, live-only events (e.g. answer
+        token deltas): they stream to connected clients but are NOT written to
+        disk, so they don't bloat the durable log or get replayed on reconnect —
+        the persisted ``final_answer`` event is the durable record of the answer.
+        """
         if self._closed:
             return
         self._seq += 1
@@ -65,9 +74,10 @@ class EventBroker:
             "type": event_type,
             "payload": payload,
         }
-        # Persist
-        with self.path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(envelope, ensure_ascii=False, default=str) + "\n")
+        # Persist (skipped for ephemeral live-only events)
+        if persist:
+            with self.path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(envelope, ensure_ascii=False, default=str) + "\n")
         # Fanout
         for q in list(self._subs):
             try:

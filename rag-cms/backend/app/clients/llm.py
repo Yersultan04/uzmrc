@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+
 from openai import AsyncOpenAI
 
 from app.config import get_settings
@@ -138,3 +140,61 @@ async def chat(
         kwargs["extra_body"] = extra_body
     resp = await client.chat.completions.create(**kwargs)
     return resp.choices[0].message.content or ""
+
+
+async def chat_stream(
+    messages: list[dict],
+    *,
+    model: str | None = None,
+    temperature: float = 0.1,
+    max_tokens: int | None = None,
+    role: str = "chat",
+    base_url: str | None = None,
+    api_key: str | None = None,
+    provider_order: list[str] | tuple[str, ...] | None = None,
+    reasoning_effort: str | None = None,
+) -> AsyncIterator[str]:
+    """Streaming variant of :func:`chat`. Async-generates content deltas as they
+    arrive. Same routing/override semantics as ``chat``. Caller concatenates the
+    deltas to obtain the full text. No ``response_format`` — streaming is for the
+    free-form final answer, not JSON steps.
+    """
+    s = get_settings()
+    default_model = s.llm_model if role == "chat" else (
+        s.llm_rerank_model if role == "rerank" else s.llm_vision_model
+    )
+    if base_url:
+        key = api_key or s.llm_api_key
+        if not key:
+            raise RuntimeError(
+                f"Per-RAG llm_base_url={base_url!r} requires an api_key in the "
+                "snapshot OR LLM_API_KEY env."
+            )
+        client = _get_client(base_url, key)
+    else:
+        client = _client_for(role)
+
+    kwargs: dict = {
+        "model": model or default_model,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": True,
+    }
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
+    extra_body: dict = {}
+    if provider_order:
+        extra_body["provider"] = {"order": list(provider_order), "allow_fallbacks": True}
+    if reasoning_effort:
+        extra_body["reasoning_effort"] = reasoning_effort
+    if extra_body:
+        kwargs["extra_body"] = extra_body
+
+    stream = await client.chat.completions.create(**kwargs)
+    async for chunk in stream:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+        piece = getattr(delta, "content", None)
+        if piece:
+            yield piece
