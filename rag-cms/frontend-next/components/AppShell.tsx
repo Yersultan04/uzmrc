@@ -23,6 +23,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -188,16 +189,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               }
             />
             <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>
-                <div className="flex flex-col">
-                  <span className="truncate text-sm font-medium text-foreground">
-                    {user?.email ?? "…"}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {isAdmin ? "Администратор" : "Сотрудник"}
-                  </span>
-                </div>
-              </DropdownMenuLabel>
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>
+                  <div className="flex flex-col">
+                    <span className="truncate text-sm font-medium text-foreground">
+                      {user?.email ?? "…"}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {isAdmin ? "Администратор" : "Сотрудник"}
+                    </span>
+                  </div>
+                </DropdownMenuLabel>
+              </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuItem variant="destructive" onClick={() => logout()}>
                 <LogOut className="h-4 w-4" />
