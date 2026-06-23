@@ -915,10 +915,30 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
         steps_used = 0
 
         try:
-            # v2 single-pass: pre-search already seeded the pool, so answer in
-            # ONE LLM call (quality model) instead of the multi-step loop. Falls
-            # back to the loop for complex (multi-entity / aggregate) queries or
-            # if single-pass yields no grounded citation. Cuts ~4 LLM calls → ~2.
+            # v2: ensure the pool is seeded for retrieval queries even if pre-search
+            # was skipped (e.g. the router returned low confidence / failed). Smalltalk
+            # already short-circuited above, so any query here needs evidence. This makes
+            # single-pass self-sufficient instead of depending on the flaky pre-search.
+            if not pool:
+                try:
+                    seed = await dispatch(ctx, "hybrid_search", {"query": query, "top_k": 12})
+                    if seed.pool:
+                        pool[:] = _pool_dedup_merge(pool, seed.pool)
+                    history.append({
+                        "step": 0, "type": "tool", "tool": "hybrid_search",
+                        "args": {"query": query, "top_k": 12}, "summary": seed.summary,
+                    })
+                    await broker.publish(
+                        "pre_search",
+                        {"tool": "hybrid_search", "args": {"query": query},
+                         "summary": seed.summary, "pool_size": len(pool)},
+                    )
+                except Exception as e:
+                    log.warning("seed search failed: %s", e)
+
+            # v2 single-pass: with the pool seeded, answer in ONE LLM call (quality
+            # model) instead of the multi-step loop. Falls back to the loop only for
+            # complex (multi-entity / aggregate) queries. Cuts ~4 LLM calls → ~2.
             if pool and (route is None or route.kind not in ("multi_entity", "aggregate")):
                 try:
                     sp_answer, sp_cites, sp_conf = await _single_pass_answer(
@@ -927,7 +947,12 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                         model=final_model, base_url=final_base,
                         api_key=final_key, provider_order=final_porder,
                     )
-                    if sp_cites:
+                    # Accept the single-pass answer whenever it produced prose.
+                    # With citations → grounded confidence. Without (typically a
+                    # genuine "not in the documents" answer) → keep the model's
+                    # low confidence and DON'T fall into the full loop, which would
+                    # only wander to budget exhaustion on the same empty evidence.
+                    if sp_answer:
                         report = ground_citations(sp_cites, pool, sp_conf)
                         await broker.publish(
                             "grounding_report",
@@ -935,10 +960,11 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                              "total": report.total, "fraction": round(report.fraction, 3),
                              "adjusted_confidence": round(report.adjusted_confidence, 3)},
                         )
+                        conf = report.adjusted_confidence if sp_cites else min(sp_conf, 0.3)
                         final_obj = FinalAnswer(
                             thought="single-pass answer from pre-searched evidence",
                             answer=sp_answer, citations=sp_cites,
-                            confidence=report.adjusted_confidence,
+                            confidence=conf,
                         )
                         steps_used = 1
                         terminated_reason = "single_pass"

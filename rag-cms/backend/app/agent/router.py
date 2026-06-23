@@ -178,7 +178,9 @@ async def _llm_route(query: str) -> RouteDecision | None:
             ],
             temperature=0.0,
             response_format={"type": "json_object"},
-            max_tokens=300,
+            max_tokens=800,  # 300 truncated the JSON ("Unterminated string") and
+                             # dropped the route to a low-confidence fallback, which
+                             # skipped pre-search; 800 lets the router JSON complete.
         )
         data = json.loads(raw)
     except Exception as e:
