@@ -51,13 +51,35 @@ REPEAT_TOOL_LIMIT = 2  # max identical (tool, args) calls before nudge
 SESSION_RECENT_TURNS = 5
 
 
+POOL_PER_FILE_CAP = 4  # in the merged pool the model sees & cites from, keep at
+                       # most this many chunks per document so citations span
+                       # several files instead of one big doc dominating. The
+                       # per-search cap in tools.py limits each retrieval; this
+                       # enforces diversity on the ACCUMULATED pool across searches.
+
+
+def _cap_per_file(pool: list[PoolEntry], cap: int = POOL_PER_FILE_CAP) -> list[PoolEntry]:
+    """Drop a document's lowest-scoring chunks once it already has `cap` in the
+    (score-sorted) pool. Generous cap → specific single-doc answers keep enough
+    evidence, but a vague query can no longer be swept by one document."""
+    seen: dict[uuid.UUID, int] = {}
+    out: list[PoolEntry] = []
+    for p in pool:
+        n = seen.get(p.file_id, 0)
+        if n < cap:
+            out.append(p)
+            seen[p.file_id] = n + 1
+    return out
+
+
 def _pool_dedup_merge(pool: list[PoolEntry], new: list[PoolEntry]) -> list[PoolEntry]:
     by_id: dict[uuid.UUID, PoolEntry] = {p.chunk_id: p for p in pool}
     for n in new:
         cur = by_id.get(n.chunk_id)
         if cur is None or n.score > cur.score:
             by_id[n.chunk_id] = n
-    return sorted(by_id.values(), key=lambda p: p.score, reverse=True)
+    merged = sorted(by_id.values(), key=lambda p: p.score, reverse=True)
+    return _cap_per_file(merged)
 
 
 def _format_pool(pool: list[PoolEntry]) -> str:
