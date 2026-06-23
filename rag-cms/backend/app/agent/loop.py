@@ -267,14 +267,11 @@ def _norm_text(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").lower()).strip()
 
 
-def _repair_citation(c: Citation, pool: list[PoolEntry]) -> PoolEntry | None:
-    """The fast loop-model sometimes emits a citation whose chunk_id matches no
-    pool entry (hallucinated / mis-copied id) even though the quoted text really
-    IS in the pool. Recover by matching the quote against pool text, so a real,
-    grounded citation isn't dropped — which otherwise sends the loop into a
-    reject→retry spiral until the step budget is exhausted (user gets nothing).
-    """
-    q = _norm_text(c.quote)
+def _match_quote(quote: str, pool: list[PoolEntry]) -> PoolEntry | None:
+    """Find the pool entry whose text best contains the quote. Used to recover a
+    citation whose chunk_id is wrong/missing but whose quoted text is really in
+    the pool (otherwise a real, grounded citation gets dropped)."""
+    q = _norm_text(quote)
     if len(q) < 12:
         return None
     probe = q[:80]
@@ -292,6 +289,10 @@ def _repair_citation(c: Citation, pool: list[PoolEntry]) -> PoolEntry | None:
             if score > best_score:
                 best_score, best = score, p
     return best if best_score >= 0.6 else None
+
+
+def _repair_citation(c: Citation, pool: list[PoolEntry]) -> PoolEntry | None:
+    return _match_quote(c.quote, pool)
 
 
 def _validate_citations(
@@ -501,6 +502,91 @@ async def _best_effort_final(
         citations=cites,
         confidence=min(report.adjusted_confidence, 0.5),
     )
+
+
+_SINGLE_PASS_RULES = (
+    "Answer the USER QUESTION using ONLY the EVIDENCE POOL above. Rules:\n"
+    "- Ground every claim in the evidence — never invent facts or citations.\n"
+    "- Be exhaustive but precise; surface every relevant figure, date, name, condition.\n"
+    "- Structure with Markdown (## headings, bullet/numbered lists, **bold**, > quotes).\n"
+    "- Put an inline [N] marker after each factual claim (N = its position in the\n"
+    "  citations array). Use ONLY the [N] form.\n"
+    "- Write the ENTIRE answer in the user's language; never mix languages (a verbatim\n"
+    "  quote may stay in the source language).\n"
+    "- If the evidence does NOT answer the question, say so plainly and set a low\n"
+    "  confidence — do NOT fabricate.\n"
+    "Return ONE JSON object EXACTLY:\n"
+    '{"answer": "<markdown answer>", '
+    '"citations": [{"chunk_id": "<uuid copied verbatim from the pool>", '
+    '"quote": "<short verbatim snippet>"}], '
+    '"confidence": <float 0..1>}'
+)
+
+
+async def _single_pass_answer(
+    query: str,
+    pool: list[PoolEntry],
+    *,
+    persona_override: str | None,
+    model: str,
+    base_url: str | None,
+    api_key: str | None,
+    provider_order: list[str] | None,
+) -> tuple[str, list[Citation], float]:
+    """v2 single-pass: produce the final grounded answer in ONE LLM call from the
+    pre-searched pool, skipping the multi-step agentic loop. Returns
+    (answer_text, validated_citations, raw_confidence). Citations are mapped to
+    pool entries by chunk_id, with a quote-match fallback."""
+    system = _resolve_persona(persona_override)
+    user = (
+        f"USER QUESTION:\n{query}\n\n"
+        f"EVIDENCE POOL ({len(pool)} chunks):\n{_format_pool(pool)}\n\n"
+        f"{_SINGLE_PASS_RULES}"
+    )
+    raw = await chat(
+        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        model=model,
+        temperature=0.1,
+        response_format={"type": "json_object"},
+        max_tokens=4000,
+        base_url=base_url,
+        api_key=api_key,
+        provider_order=provider_order,
+    )
+    data = json.loads(_extract_first_json_object(raw.strip()))
+    answer = str(data.get("answer") or "").strip()
+    try:
+        raw_conf = float(data.get("confidence", 0.5))
+    except (TypeError, ValueError):
+        raw_conf = 0.5
+    by_id = {p.chunk_id: p for p in pool}
+    cites: list[Citation] = []
+    seen: set[uuid.UUID] = set()
+    for c in (data.get("citations") or []):
+        if not isinstance(c, dict):
+            continue
+        quote = str(c.get("quote") or "")
+        p: PoolEntry | None = None
+        try:
+            p = by_id.get(uuid.UUID(str(c.get("chunk_id"))))
+        except (ValueError, TypeError, AttributeError):
+            p = None
+        if p is None:
+            p = _match_quote(quote, pool)
+        if p is None or p.chunk_id in seen:
+            continue
+        seen.add(p.chunk_id)
+        cites.append(
+            Citation(
+                chunk_id=p.chunk_id,
+                file_id=p.file_id,
+                filename=p.filename,
+                page_start=p.page_start,
+                page_end=p.page_end,
+                quote=quote[:400],
+            )
+        )
+    return answer, cites, max(0.0, min(1.0, raw_conf))
 
 
 async def _summarise_turns(turns: list[tuple[str, str]], previous_summary: str | None) -> str:
@@ -829,7 +915,46 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
         steps_used = 0
 
         try:
+            # v2 single-pass: pre-search already seeded the pool, so answer in
+            # ONE LLM call (quality model) instead of the multi-step loop. Falls
+            # back to the loop for complex (multi-entity / aggregate) queries or
+            # if single-pass yields no grounded citation. Cuts ~4 LLM calls → ~2.
+            if pool and (route is None or route.kind not in ("multi_entity", "aggregate")):
+                try:
+                    sp_answer, sp_cites, sp_conf = await _single_pass_answer(
+                        query, pool,
+                        persona_override=persona_override,
+                        model=final_model, base_url=final_base,
+                        api_key=final_key, provider_order=final_porder,
+                    )
+                    if sp_cites:
+                        report = ground_citations(sp_cites, pool, sp_conf)
+                        await broker.publish(
+                            "grounding_report",
+                            {"step": 1, "grounded": report.grounded_count,
+                             "total": report.total, "fraction": round(report.fraction, 3),
+                             "adjusted_confidence": round(report.adjusted_confidence, 3)},
+                        )
+                        final_obj = FinalAnswer(
+                            thought="single-pass answer from pre-searched evidence",
+                            answer=sp_answer, citations=sp_cites,
+                            confidence=report.adjusted_confidence,
+                        )
+                        steps_used = 1
+                        terminated_reason = "single_pass"
+                        await broker.publish(
+                            "final_answer",
+                            {"step": 1, "answer": final_obj.answer,
+                             "confidence": final_obj.confidence, "raw_confidence": sp_conf,
+                             "citations": [c.model_dump(mode="json") for c in final_obj.citations],
+                             "warnings": []},
+                        )
+                except Exception as e:
+                    log.warning("single-pass failed, falling back to loop: %s", e)
+
             for step in range(1, max_steps + 1):
+                if final_obj is not None or escalated is not None:
+                    break
                 steps_used = step
                 messages = _build_messages(
                     query, pool, history, step, max_steps, nudge,

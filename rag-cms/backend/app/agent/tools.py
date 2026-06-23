@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -12,11 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.schemas import PoolEntry
 from app.clients.llm import chat
 from app.clients.embeddings import embed_query
+from app.clients.voyage import rerank as voyage_rerank
 from app.models import Chunk, File
 from app.retrieval.dense import dense_search as do_dense
 from app.retrieval.hybrid import hybrid_search
 from app.retrieval.rerank import RerankItem, llm_rerank
 from app.retrieval.sparse import sparse_search as do_sparse
+
+log = logging.getLogger("agent.tools")
 
 
 @dataclass
@@ -92,40 +96,57 @@ PER_FILE_CAP = 3  # max chunks from one document in a single search result, so a
                   # broad/vague query doesn't fill the whole pool from one big file
 
 
-def _diversify_by_file(
-    pairs: list[tuple[Chunk, Any]], top_k: int, per_file_cap: int = PER_FILE_CAP
-) -> list[tuple[Chunk, Any]]:
-    """Source diversity for retrieval. ``pairs`` are score-sorted (chunk, hit).
-    Keep at most ``per_file_cap`` chunks per file in the primary slate so several
-    documents surface for a broad query; only backfill from over-cap chunks
-    (still score-ordered) when there aren't enough distinct files to reach
-    ``top_k``. Specific queries where one document holds the answer are
-    unaffected — its top chunks stay; the rest just move below other docs.
-    """
-    primary: list[tuple[Chunk, Any]] = []
-    overflow: list[tuple[Chunk, Any]] = []
+def _diversify_scored(
+    scored: list[tuple[Chunk, float]], top_k: int, per_file_cap: int = PER_FILE_CAP
+) -> list[tuple[Chunk, float]]:
+    """Source diversity. ``scored`` are relevance-sorted (chunk, score). Keep at
+    most ``per_file_cap`` chunks per file in the primary slate so several docs
+    surface; backfill from over-cap chunks only to reach ``top_k``."""
+    primary: list[tuple[Chunk, float]] = []
+    overflow: list[tuple[Chunk, float]] = []
     per_file: dict[uuid.UUID, int] = {}
-    for c, fh in pairs:
+    for c, sc in scored:
         if per_file.get(c.file_id, 0) < per_file_cap:
-            primary.append((c, fh))
+            primary.append((c, sc))
             per_file[c.file_id] = per_file.get(c.file_id, 0) + 1
         else:
-            overflow.append((c, fh))
+            overflow.append((c, sc))
     if len(primary) < top_k:
         primary.extend(overflow[: top_k - len(primary)])
     return primary[:top_k]
 
 
-@tool("hybrid_search")
-async def hybrid_search_tool(ctx: AgentContext, args: dict) -> ToolResult:
-    query = _require_str(args, "query")
-    top_k = _opt_int(args, "top_k", 10, 1, 50)
-    # Fetch a deeper candidate set than requested, then diversify down to top_k
-    # so one document can't sweep the whole result for a vague query.
-    fetch_k = min(50, max(top_k * 3, 15))
-    pairs = await hybrid_search(ctx.db, ctx.rag_id, query, top_k=fetch_k, mode="hybrid")
-    pairs = _diversify_by_file(pairs, top_k)
-    pool = [
+async def _voyage_rerank_pairs(
+    query: str, pairs: list[tuple[Chunk, Any]]
+) -> list[tuple[Chunk, float]]:
+    """v2: always-on cross-encoder-style rerank with Voyage rerank-2.5. Reorders
+    the hybrid candidate set by TRUE relevance to the query (fixes the case where
+    hybrid scores surface tangential chunks, e.g. an IT-strategy doc answering a
+    borrower-requirements question). Falls back to the original order on error."""
+    if len(pairs) <= 1:
+        return [(c, getattr(fh, "score", 0.0)) for c, fh in pairs]
+    docs = [(c.text or "")[:2000] for c, _ in pairs]
+    try:
+        ranked = await voyage_rerank(query, docs)  # [(orig_index, relevance)] desc
+    except Exception as e:
+        log.warning("voyage rerank failed, keeping hybrid order: %s", e)
+        return [(c, getattr(fh, "score", 0.0)) for c, fh in pairs]
+    return [(pairs[i][0], float(sc)) for i, sc in ranked]
+
+
+async def _search_to_pool(
+    ctx: AgentContext, query: str, top_k: int, mode: str
+) -> list[PoolEntry]:
+    """v2 retrieval pipeline: fetch a wide candidate set → always-on Voyage
+    rerank → per-file diversify → top_k → PoolEntry list. Shared by the three
+    search tools."""
+    fetch_k = min(50, max(top_k * 4, 24))
+    pairs = await hybrid_search(ctx.db, ctx.rag_id, query, top_k=fetch_k, mode=mode)
+    if not pairs:
+        return []
+    scored = await _voyage_rerank_pairs(query, pairs)
+    scored = _diversify_scored(scored, top_k)
+    return [
         PoolEntry(
             chunk_id=c.id,
             file_id=c.file_id,
@@ -134,10 +155,17 @@ async def hybrid_search_tool(ctx: AgentContext, args: dict) -> ToolResult:
             page_end=c.page_end,
             heading=c.heading,
             text=c.text,
-            score=fh.score,
+            score=sc,
         )
-        for c, fh in pairs
+        for c, sc in scored
     ]
+
+
+@tool("hybrid_search")
+async def hybrid_search_tool(ctx: AgentContext, args: dict) -> ToolResult:
+    query = _require_str(args, "query")
+    top_k = _opt_int(args, "top_k", 10, 1, 50)
+    pool = await _search_to_pool(ctx, query, top_k, "hybrid")
     return ToolResult(summary=f"hybrid_search: {len(pool)} hits for {query!r}", pool=pool)
 
 
@@ -145,17 +173,7 @@ async def hybrid_search_tool(ctx: AgentContext, args: dict) -> ToolResult:
 async def dense_search_tool(ctx: AgentContext, args: dict) -> ToolResult:
     query = _require_str(args, "query")
     top_k = _opt_int(args, "top_k", 10, 1, 50)
-    fetch_k = min(50, max(top_k * 3, 15))
-    pairs = await hybrid_search(ctx.db, ctx.rag_id, query, top_k=fetch_k, mode="dense")
-    pairs = _diversify_by_file(pairs, top_k)
-    pool = [
-        PoolEntry(
-            chunk_id=c.id, file_id=c.file_id, filename=c.file.filename if c.file else "",
-            page_start=c.page_start, page_end=c.page_end, heading=c.heading,
-            text=c.text, score=fh.score,
-        )
-        for c, fh in pairs
-    ]
+    pool = await _search_to_pool(ctx, query, top_k, "dense")
     return ToolResult(summary=f"dense_search: {len(pool)} hits for {query!r}", pool=pool)
 
 
@@ -163,17 +181,7 @@ async def dense_search_tool(ctx: AgentContext, args: dict) -> ToolResult:
 async def sparse_search_tool(ctx: AgentContext, args: dict) -> ToolResult:
     query = _require_str(args, "query")
     top_k = _opt_int(args, "top_k", 10, 1, 50)
-    fetch_k = min(50, max(top_k * 3, 15))
-    pairs = await hybrid_search(ctx.db, ctx.rag_id, query, top_k=fetch_k, mode="sparse")
-    pairs = _diversify_by_file(pairs, top_k)
-    pool = [
-        PoolEntry(
-            chunk_id=c.id, file_id=c.file_id, filename=c.file.filename if c.file else "",
-            page_start=c.page_start, page_end=c.page_end, heading=c.heading,
-            text=c.text, score=fh.score,
-        )
-        for c, fh in pairs
-    ]
+    pool = await _search_to_pool(ctx, query, top_k, "sparse")
     return ToolResult(summary=f"sparse_search: {len(pool)} hits for {query!r}", pool=pool)
 
 
