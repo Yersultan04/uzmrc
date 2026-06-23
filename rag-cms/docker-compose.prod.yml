@@ -52,6 +52,10 @@ services:
       LLM_API_BASE_URL: ${LLM_API_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-openai/gpt-4o-mini}
+      # Hybrid loop: fast model drives the agent steps (tool selection / search),
+      # the RAG's quality model synthesizes & streams the final answer. Enables
+      # token streaming + a faster loop. Unset → single-model (no streaming).
+      AGENT_STEP_MODEL: ${AGENT_STEP_MODEL:-}
       RERANK_API_BASE_URL: ${RERANK_API_BASE_URL:-}
       RERANK_API_KEY: ${RERANK_API_KEY:-}
       LLM_RERANK_MODEL: ${LLM_RERANK_MODEL:-openai/gpt-4o-mini}
