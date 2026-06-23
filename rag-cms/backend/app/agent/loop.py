@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from datetime import datetime, timezone
@@ -240,6 +241,37 @@ def _parse_step(raw: str) -> NextStepEnvelope:
     return NextStepEnvelope.model_validate(data)
 
 
+def _norm_text(s: str) -> str:
+    return re.sub(r"\s+", " ", (s or "").lower()).strip()
+
+
+def _repair_citation(c: Citation, pool: list[PoolEntry]) -> PoolEntry | None:
+    """The fast loop-model sometimes emits a citation whose chunk_id matches no
+    pool entry (hallucinated / mis-copied id) even though the quoted text really
+    IS in the pool. Recover by matching the quote against pool text, so a real,
+    grounded citation isn't dropped — which otherwise sends the loop into a
+    reject→retry spiral until the step budget is exhausted (user gets nothing).
+    """
+    q = _norm_text(c.quote)
+    if len(q) < 12:
+        return None
+    probe = q[:80]
+    qs = set(q.split())
+    best: PoolEntry | None = None
+    best_score = 0.0
+    for p in pool:
+        t = _norm_text(p.text)
+        if not t:
+            continue
+        if probe and probe in t:
+            return p  # strong substring hit — accept immediately
+        if qs:
+            score = len(qs & set(t.split())) / len(qs)
+            if score > best_score:
+                best_score, best = score, p
+    return best if best_score >= 0.6 else None
+
+
 def _validate_citations(
     final: FinalAnswer, pool: list[PoolEntry]
 ) -> tuple[list[Citation], list[str]]:
@@ -249,8 +281,13 @@ def _validate_citations(
     for c in final.citations:
         p = by_id.get(c.chunk_id)
         if p is None:
-            warnings.append(f"citation chunk_id={c.chunk_id} not in pool — dropped")
-            continue
+            p = _repair_citation(c, pool)
+            if p is None:
+                warnings.append(f"citation chunk_id={c.chunk_id} not in pool — dropped")
+                continue
+            warnings.append(
+                f"citation chunk_id={c.chunk_id} remapped to {p.chunk_id} by quote match"
+            )
         valid.append(
             Citation(
                 chunk_id=p.chunk_id,
@@ -371,6 +408,59 @@ async def _synthesize_final_answer(
         api_key=api_key,
         provider_order=provider_order,
     )).strip()
+
+
+async def _best_effort_final(
+    query: str,
+    pool: list[PoolEntry],
+    *,
+    persona_override: str | None,
+    model: str,
+    base_url: str | None,
+    api_key: str | None,
+    provider_order: list[str] | None,
+) -> FinalAnswer | None:
+    """Last-resort answer when the loop exhausts its budget without producing a
+    grounded final. Instead of failing with nothing, synthesise an answer from
+    the top evidence we DID retrieve, citing those chunks directly, at low
+    confidence. The user always gets a usable response.
+    """
+    if not pool:
+        return None
+    top = pool[:8]
+    cites = [
+        Citation(
+            chunk_id=p.chunk_id,
+            file_id=p.file_id,
+            filename=p.filename,
+            page_start=p.page_start,
+            page_end=p.page_end,
+            quote=(p.text or "")[:300],
+        )
+        for p in top
+    ]
+    try:
+        answer = await _synthesize_final_answer(
+            query,
+            pool,
+            draft="(no draft — write the answer directly from the EVIDENCE below)",
+            citations=cites,
+            persona_override=persona_override,
+            model=model,
+            base_url=base_url,
+            api_key=api_key,
+            provider_order=provider_order,
+        )
+    except Exception as e:
+        log.warning("best-effort synthesis failed: %s", e)
+        return None
+    report = ground_citations(cites, pool, 0.35)
+    return FinalAnswer(
+        thought="Budget exhausted; answering from the retrieved evidence.",
+        answer=answer,
+        citations=cites,
+        confidence=min(report.adjusted_confidence, 0.5),
+    )
 
 
 async def _summarise_turns(turns: list[tuple[str, str]], previous_summary: str | None) -> str:
@@ -882,6 +972,35 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                     "budget_exhausted",
                     {"step": steps_used, "pool_size": len(pool)},
                 )
+
+            # Graceful degradation: ended (budget exhausted, or fell through)
+            # without a grounded final answer or an escalation. Rather than
+            # failing with nothing, synthesise a best-effort answer from the
+            # evidence we DID gather. Only a truly empty pool still fails.
+            if final_obj is None and escalated is None and pool:
+                be = await _best_effort_final(
+                    query, pool,
+                    persona_override=persona_override,
+                    model=final_model, base_url=final_base,
+                    api_key=final_key, provider_order=final_porder,
+                )
+                if be is not None:
+                    final_obj = be
+                    terminated_reason = f"{terminated_reason or 'ended'}+best_effort"
+                    await broker.publish(
+                        "final_answer",
+                        {
+                            "step": steps_used,
+                            "answer": be.answer,
+                            "confidence": be.confidence,
+                            "raw_confidence": be.confidence,
+                            "citations": [c.model_dump(mode="json") for c in be.citations],
+                            "warnings": [
+                                "best-effort answer: synthesised from retrieved "
+                                "evidence after the step budget ran out"
+                            ],
+                        },
+                    )
 
             # Persist run result
             if final_obj is not None:
