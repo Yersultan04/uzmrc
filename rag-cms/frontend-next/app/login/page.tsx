@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { authApi } from "@/lib/api";
+import { authApi, ragsApi } from "@/lib/api";
 import { saveToken, saveUser } from "@/lib/auth";
 import { useAppStore } from "@/lib/store";
 import { ArrowRight, Loader2, ShieldCheck } from "lucide-react";
@@ -29,7 +29,7 @@ function LoginForm() {
       .catch(() => setBootstrap(false));
   }, []);
 
-  function destination(role: string): string {
+  async function destination(role: string): Promise<string> {
     const redirect = params.get("redirect");
     // Only allow same-site, absolute-path redirects. Reject protocol-relative
     // ("//evil.com") and backslash variants ("/\evil.com") that browsers treat
@@ -42,7 +42,17 @@ function LoginForm() {
     ) {
       return redirect;
     }
-    return role === "admin" ? "/admin/users" : "/";
+    if (role === "admin") return "/admin/users";
+    // Regular users get a chat-only experience: send them straight into the chat
+    // of their (first) accessible knowledge base — no base-management screens.
+    try {
+      const rags = await ragsApi.list();
+      const target = rags.find((r) => r.status === "ready") ?? rags[0];
+      if (target) return `/rags/${target.id}/chat`;
+    } catch {
+      /* fall through to base list */
+    }
+    return "/";
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -56,11 +66,11 @@ function LoginForm() {
         saveUser(tokens.user);
         setUser(tokens.user);
         toast.success("Учётная запись администратора создана");
-        router.replace(destination(tokens.user.role));
+        router.replace(await destination(tokens.user.role));
       } else {
         const user = await login(email, password);
         toast.success("С возвращением");
-        router.replace(destination(user.role));
+        router.replace(await destination(user.role));
       }
     } catch {
       toast.error(
