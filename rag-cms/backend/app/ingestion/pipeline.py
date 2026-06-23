@@ -17,6 +17,7 @@ from app.ingestion.enrichment import enrich_chunks
 from app.ingestion.events import IngestEventBroker
 from app.ingestion.ocr import ocr_page
 from app.ingestion.parser import ParsedPage, parse_file
+from app.ingestion.normalize import normalize_text
 from app.ingestion.table_describe import describe_tables_batched
 from app.models import Chunk, File, FileStatus, IngestRun, IngestRunStatus, Rag, RagStatus
 from app.presets import resolve_models_for_rag
@@ -131,6 +132,11 @@ async def _process_file(
     )
     if ocr_replaced:
         log.info("OCR fallback applied to %d page(s) of %s", ocr_replaced, file_obj.filename)
+
+    # Normalize every page's text before chunking: NFC, repair hyphenated line
+    # breaks, fold Cyrillic/Latin homoglyphs, collapse whitespace. Cleaner text →
+    # quotes ground reliably → higher confidence (for content that exists).
+    pages = [ParsedPage(page_number=p.page_number, text=normalize_text(p.text)) for p in pages]
 
     run.current_stage = "chunking"
     await db.commit()
