@@ -216,7 +216,8 @@ async def decompose_and_search_tool(ctx: AgentContext, args: dict) -> ToolResult
     )
     try:
         sub = [s for s in json.loads(raw).get("subqueries", []) if isinstance(s, str) and s.strip()]
-    except Exception:
+    except Exception as e:
+        log.warning("decompose_and_search: sub-query JSON parse failed, falling back to raw query: %s", e)
         sub = [query]
     sub = sub[:max_sub] or [query]
 
@@ -549,4 +550,8 @@ async def dispatch(ctx: AgentContext, name: str, args: dict) -> ToolResult:
     try:
         return await fn(ctx, args)
     except Exception as e:
+        # Degrades gracefully into the agent's own trace (log.warning here is the
+        # ONLY server-side record — without it a real DB/embedding-provider outage
+        # is invisible to ops, only visible per-run in the UI trace.
+        log.warning("tool %r failed: %s: %s", name, type(e).__name__, e)
         return ToolResult(summary=f"tool {name!r} failed: {type(e).__name__}: {e}")

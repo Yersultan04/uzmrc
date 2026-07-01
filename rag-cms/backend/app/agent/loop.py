@@ -404,6 +404,7 @@ async def _synthesize_final_answer(
     api_key: str | None,
     provider_order: list[str] | None,
     on_delta: Callable[[str], Awaitable[None]] | None = None,
+    prior_turns: list[dict] | None = None,
 ) -> str:
     """Polish the final answer with the quality model, reusing the citation set the
     (fast) loop already validated. Returns the rewritten Markdown answer text.
@@ -422,6 +423,7 @@ async def _synthesize_final_answer(
 
     system = _resolve_persona(persona_override)
     user = (
+        f"{_format_prior_block(prior_turns)}"
         f"USER QUESTION:\n{query}\n\n"
         f"EVIDENCE (numbered — cite with these exact [N] markers):\n{evidence}\n\n"
         f"DRAFT ANSWER (from a faster model — may be rough, improve it):\n{draft}\n\n"
@@ -464,6 +466,7 @@ async def _best_effort_final(
     base_url: str | None,
     api_key: str | None,
     provider_order: list[str] | None,
+    prior_turns: list[dict] | None = None,
 ) -> FinalAnswer | None:
     """Last-resort answer when the loop exhausts its budget without producing a
     grounded final. Instead of failing with nothing, synthesise an answer from
@@ -495,6 +498,7 @@ async def _best_effort_final(
             base_url=base_url,
             api_key=api_key,
             provider_order=provider_order,
+            prior_turns=prior_turns,
         )
     except Exception as e:
         log.warning("best-effort synthesis failed: %s", e)
@@ -1111,6 +1115,7 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                                 model=final_model, base_url=final_base,
                                 api_key=final_key, provider_order=final_porder,
                                 on_delta=_emit,
+                                prior_turns=prior_turns,
                             )
                             if _buf["s"]:
                                 await broker.publish(
@@ -1227,6 +1232,7 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                     persona_override=persona_override,
                     model=final_model, base_url=final_base,
                     api_key=final_key, provider_order=final_porder,
+                    prior_turns=prior_turns,
                 )
                 if be is not None:
                     final_obj = be

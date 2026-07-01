@@ -44,7 +44,7 @@ async def _decorate(db: AsyncSession, rag: Rag, user: User) -> RagOut:
 
 
 @router.get("/_presets")
-async def get_presets() -> list[dict]:
+async def get_presets(user: User = Depends(current_user)) -> list[dict]:
     """List available model presets the UI can surface in the create-RAG dialog."""
     return list_presets()
 

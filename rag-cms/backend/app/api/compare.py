@@ -28,12 +28,13 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import get_accessible_rag, new_stream_token
+from app.auth import current_user, get_accessible_rag, new_stream_token
 from app.compare.events import CompareEventBroker, replay_from_disk
 from app.compare.worker import run_comparison
 from app.config import get_settings
 from app.db import get_db
-from app.models import CompareRun, CompareRunStatus, Rag
+from app.models import CompareRun, CompareRunStatus, Rag, User
+from app.ratelimit import compare_run_rate_limit
 from app.schemas import CompareRunOut
 
 log = logging.getLogger("api.compare")
@@ -65,8 +66,10 @@ async def start_compare(
     file: UploadFile,
     background: BackgroundTasks,
     rag: Rag = Depends(get_accessible_rag),
+    user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CompareRun:
+    compare_run_rate_limit(user.id)
     if not file.filename:
         raise HTTPException(400, "missing filename")
     suffix = Path(file.filename).suffix.lower()

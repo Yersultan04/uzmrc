@@ -17,6 +17,7 @@ from app.agent.schemas import AgentRunStartRequest
 from app.auth import current_user, get_accessible_rag, get_visible_rag, new_stream_token
 from app.db import get_db
 from app.models import AgentRun, AgentRunStatus, ChatSession, Rag, RagStatus, User, UserRole
+from app.ratelimit import agent_run_rate_limit
 
 router = APIRouter()
 
@@ -134,7 +135,7 @@ async def get_chat_session(
 async def rename_chat_session(
     session_id: uuid.UUID,
     payload: dict,
-    rag: Rag = Depends(get_visible_rag),
+    rag: Rag = Depends(get_accessible_rag),  # write op — revoked members are read-only
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -149,7 +150,7 @@ async def rename_chat_session(
 @router.delete("/{rag_id}/chat_sessions/{session_id}", status_code=204)
 async def delete_chat_session(
     session_id: uuid.UUID,
-    rag: Rag = Depends(get_visible_rag),
+    rag: Rag = Depends(get_accessible_rag),  # write op — revoked members are read-only
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ) -> None:
@@ -169,6 +170,7 @@ async def start_agent_run(
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    agent_run_rate_limit(user.id)
     if rag.status != RagStatus.ready:
         raise HTTPException(409, f"RAG is not ready (status={rag.status.value})")
     max_steps = payload.max_steps or DEFAULT_MAX_STEPS
