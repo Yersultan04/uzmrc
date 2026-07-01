@@ -837,10 +837,13 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
         if route is not None and not route.needs_retrieval:
             try:
                 # Greetings don't need the heavy model — use the fast step model.
+                # Still gets prior_turns: "спасибо" / "и всё?" after a real answer
+                # should read as closing THAT topic, not a generic canned reply —
+                # same reasoning as the router/single-pass fixes above.
                 answer = (await chat(
                     [
                         {"role": "system", "content": build_smalltalk_message(persona_override)},
-                        {"role": "user", "content": query},
+                        {"role": "user", "content": f"{_format_prior_block(prior_turns)}{query}"},
                     ],
                     model=step_model,
                     base_url=step_base,
