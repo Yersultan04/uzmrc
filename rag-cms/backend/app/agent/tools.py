@@ -325,11 +325,17 @@ async def exact_lookup_tool(ctx: AgentContext, args: dict) -> ToolResult:
             await ctx.db.execute(select(File).where(File.id.in_(file_ids)))
         ).scalars().all()
     }
+    # Not 1.0: a bare regex match (e.g. a 2-letter abbreviation router picks for
+    # "документ ИТ") can hit dozens of unrelated chunks via substring (кредит,
+    # лимит, депозит all contain "ит"). At 1.0 those false positives outrank every
+    # calibrated hybrid_search score and crowd the real answer out of the
+    # POOL_PROMPT_CAP window merged in _pool_dedup_merge. 0.7 keeps genuine exact
+    # matches competitive without letting them mechanically dominate semantic hits.
     pool = [
         PoolEntry(
             chunk_id=c.id, file_id=c.file_id, filename=file_map.get(c.file_id, ""),
             page_start=c.page_start, page_end=c.page_end, heading=c.heading,
-            text=c.text, score=1.0,
+            text=c.text, score=0.7,
         )
         for c in rows
     ]
