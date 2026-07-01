@@ -128,7 +128,16 @@ _ROUTE_SYSTEM = (
     "4. hybrid_search — default for free-text questions that don't fit above.\n\n"
     "Be opportunistic about exact_lookup: if there is ANY literal token the user "
     "names, prefer it over hybrid_search. Even if uncertain, set confidence 0.7+ "
-    "and let downstream tools also run."
+    "and let downstream tools also run.\n\n"
+    "FOLLOW-UPS: if RECENT CONVERSATION is given below the question, the current "
+    "message may be a short continuation (\"расскажи подробнее\", \"а почему?\", "
+    "\"and what about the fee\", \"и что дальше\") that only makes sense in light "
+    "of the prior turn. Judge it AS a continuation of that topic, NOT in "
+    "isolation — do not classify a contentless follow-up as smalltalk just "
+    "because it has no topic words of its own; the topic is the prior turn's. "
+    "When you route it to a search tool, set args.query to a SELF-CONTAINED "
+    "rephrasing that folds in the prior topic (e.g. prior topic + \"— подробнее, "
+    "детали\"), since the bare follow-up text alone is meaningless to a retriever."
 )
 
 
@@ -169,12 +178,34 @@ def _regex_route(query: str) -> RouteDecision | None:
     return None
 
 
-async def _llm_route(query: str) -> RouteDecision | None:
+def _format_history(prior_turns: list[dict] | None) -> str:
+    """Last couple of Q/A turns, for the router only — just enough to resolve a
+    short follow-up against its topic. Mirrors the (larger) block _build_messages
+    gives the answering model."""
+    if not prior_turns:
+        return ""
+    lines: list[str] = []
+    for t in prior_turns[-2:]:
+        if t.get("kind") != "turn":
+            continue
+        q = (t.get("query") or "").strip().replace("\n", " ")[:200]
+        a = (t.get("answer") or "").strip().replace("\n", " ")[:300]
+        if q:
+            lines.append(f"  Q: {q}")
+        if a:
+            lines.append(f"  A: {a}")
+    if not lines:
+        return ""
+    return "RECENT CONVERSATION:\n" + "\n".join(lines) + "\n\n"
+
+
+async def _llm_route(query: str, history_block: str = "") -> RouteDecision | None:
     try:
         raw = await chat(
             [
                 {"role": "system", "content": _ROUTE_SYSTEM},
-                {"role": "user", "content": query},
+                {"role": "user", "content": f"{history_block}CURRENT QUESTION:\n{query}"
+                                            if history_block else query},
             ],
             temperature=0.0,
             response_format={"type": "json_object"},
@@ -217,14 +248,14 @@ async def _llm_route(query: str) -> RouteDecision | None:
     )
 
 
-async def route_query(query: str) -> RouteDecision:
+async def route_query(query: str, prior_turns: list[dict] | None = None) -> RouteDecision:
     fast = _regex_route(query)
     # A confident regex hit (smalltalk or quoted phrase) short-circuits the LLM call.
     if fast is not None and fast.confidence >= 0.8:
         if fast.kind == "smalltalk":
             return fast  # no companions, no retrieval
         return _attach_companions(fast, query)
-    llm = await _llm_route(query)
+    llm = await _llm_route(query, _format_history(prior_turns))
     if llm is not None:
         return _attach_companions(llm, query)
     if fast is not None:

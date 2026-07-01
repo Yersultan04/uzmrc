@@ -755,9 +755,11 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
         if run.session_id is not None:
             prior_turns = await _build_session_context(db, run.session_id, run.id)
 
-        # Pre-loop: route the query
+        # Pre-loop: route the query. Prior turns are threaded in so a short
+        # follow-up ("расскажи подробнее") resolves against the previous topic
+        # instead of being misread as smalltalk/off-topic in isolation.
         try:
-            route = await route_query(query)
+            route = await route_query(query, prior_turns)
             await broker.publish(
                 "router_decision",
                 {
