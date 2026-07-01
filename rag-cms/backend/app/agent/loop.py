@@ -102,6 +102,31 @@ def _format_pool(pool: list[PoolEntry]) -> str:
     return "\n".join(lines) + suffix
 
 
+def _format_prior_block(prior_turns: list[dict] | None) -> str:
+    if not prior_turns:
+        return ""
+    lines = ["PRIOR CONVERSATION (same chat session — use for context only):"]
+    for t in prior_turns:
+        kind = t.get("kind", "turn")
+        if kind == "summary":
+            lines.append("  [Earlier in this conversation — summary]")
+            summ = (t.get("summary") or "").strip()
+            # indent each line so it sits inside the block
+            for ln in summ.splitlines():
+                lines.append(f"    {ln}")
+        else:
+            q = (t.get("query") or "").strip().replace("\n", " ")
+            a = (t.get("answer") or "").strip().replace("\n", " ")
+            if len(q) > 240:
+                q = q[:240] + "…"
+            if len(a) > 600:
+                a = a[:600] + "…"
+            lines.append(f"  Q: {q}")
+            if a:
+                lines.append(f"  A: {a}")
+    return "\n".join(lines) + "\n\n"
+
+
 def _summarize_history(history: list[dict]) -> str:
     if not history:
         return "(no prior steps)"
@@ -163,28 +188,7 @@ def _build_messages(
             f"  rationale: {route.rationale}\n\n"
         )
 
-    prior_block = ""
-    if prior_turns:
-        lines = ["PRIOR CONVERSATION (same chat session — use for context only):"]
-        for t in prior_turns:
-            kind = t.get("kind", "turn")
-            if kind == "summary":
-                lines.append("  [Earlier in this conversation — summary]")
-                summ = (t.get("summary") or "").strip()
-                # indent each line so it sits inside the block
-                for ln in summ.splitlines():
-                    lines.append(f"    {ln}")
-            else:
-                q = (t.get("query") or "").strip().replace("\n", " ")
-                a = (t.get("answer") or "").strip().replace("\n", " ")
-                if len(q) > 240:
-                    q = q[:240] + "…"
-                if len(a) > 600:
-                    a = a[:600] + "…"
-                lines.append(f"  Q: {q}")
-                if a:
-                    lines.append(f"  A: {a}")
-        prior_block = "\n".join(lines) + "\n\n"
+    prior_block = _format_prior_block(prior_turns)
 
     user_content = (
         f"{prior_block}"
@@ -534,13 +538,21 @@ async def _single_pass_answer(
     base_url: str | None,
     api_key: str | None,
     provider_order: list[str] | None,
+    prior_turns: list[dict] | None = None,
 ) -> tuple[str, list[Citation], float]:
     """v2 single-pass: produce the final grounded answer in ONE LLM call from the
     pre-searched pool, skipping the multi-step agentic loop. Returns
     (answer_text, validated_citations, raw_confidence). Citations are mapped to
-    pool entries by chunk_id, with a quote-match fallback."""
+    pool entries by chunk_id, with a quote-match fallback.
+
+    prior_turns is needed here for the same reason the router needs it: a
+    contentless follow-up ("расскажи подробнее") has no topic of its own, so
+    without the preceding Q/A the model sees only "tell me more" plus an
+    evidence pool it has no way to connect to the question, and correctly (by
+    its own narrow view) reports the evidence doesn't answer it."""
     system = _resolve_persona(persona_override)
     user = (
+        f"{_format_prior_block(prior_turns)}"
         f"USER QUESTION:\n{query}\n\n"
         f"EVIDENCE POOL ({len(pool)} chunks):\n{_format_pool(pool)}\n\n"
         f"{_SINGLE_PASS_RULES}"
@@ -956,6 +968,7 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                         persona_override=persona_override,
                         model=final_model, base_url=final_base,
                         api_key=final_key, provider_order=final_porder,
+                        prior_turns=prior_turns,
                     )
                     # Accept the single-pass answer whenever it produced prose.
                     # With citations → grounded confidence. Without (typically a
