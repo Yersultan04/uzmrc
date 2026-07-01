@@ -27,6 +27,12 @@ class RouteDecision:
     # to combine precision (exact_lookup) with recall (hybrid_search). Each is
     # (tool_name, args).
     companions: list[tuple[str, dict]] = field(default_factory=list)
+    # Self-contained restatement of the query, folding in the prior topic for
+    # contentless follow-ups ("расскажи подробнее" → "<prior topic> — подробнее").
+    # None when the router judged the raw query already self-contained. Used for
+    # the hybrid_search companion instead of the raw follow-up text, which on its
+    # own carries no retrievable signal.
+    resolved_query: str | None = None
 
 
 def _attach_companions(route: RouteDecision, query: str) -> RouteDecision:
@@ -34,12 +40,14 @@ def _attach_companions(route: RouteDecision, query: str) -> RouteDecision:
 
     Currently: any exact_lookup gets hybrid_search as a companion. The user's
     literal regex catches verbatim matches; the embedder catches paraphrases
-    and surrounding context.
+    and surrounding context. Uses resolved_query (if the router produced one) so
+    a follow-up like "расскажи подробнее" searches on the actual topic instead
+    of its own contentless text.
     """
     if route.suggested_tool == "exact_lookup":
         route.companions.append((
             "hybrid_search",
-            {"query": query, "top_k": 10},
+            {"query": route.resolved_query or query, "top_k": 10},
         ))
     return route
 
@@ -93,6 +101,8 @@ _ROUTE_SYSTEM = (
     '{"kind": "smalltalk|lookup|multi_entity|aggregate|definition|free_text",\n'
     ' "tool":  "none|hybrid_search|dense_search|sparse_search|decompose_and_search|hyde_search|exact_lookup|list_files",\n'
     ' "args":  { … tool-specific arguments … },\n'
+    ' "resolved_query": "<self-contained restatement of what the user needs — see FOLLOW-UPS; '
+    'omit or repeat the question verbatim when it is already self-contained>",\n'
     ' "rationale": "<one short sentence>",\n'
     ' "confidence": <0.0..1.0>}\n\n'
     "0. smalltalk — use this (tool=\"none\") for messages that are NOT questions about "
@@ -135,9 +145,12 @@ _ROUTE_SYSTEM = (
     "of the prior turn. Judge it AS a continuation of that topic, NOT in "
     "isolation — do not classify a contentless follow-up as smalltalk just "
     "because it has no topic words of its own; the topic is the prior turn's. "
-    "When you route it to a search tool, set args.query to a SELF-CONTAINED "
-    "rephrasing that folds in the prior topic (e.g. prior topic + \"— подробнее, "
-    "детали\"), since the bare follow-up text alone is meaningless to a retriever."
+    "Put a SELF-CONTAINED restatement in \"resolved_query\" — the prior topic "
+    "folded into the current request (e.g. prior topic + \"— подробнее, детали\") "
+    "— because the bare follow-up text alone (\"расскажи подробнее\") carries no "
+    "retrievable signal for a search tool. This applies whether the primary tool "
+    "is a search tool directly or exact_lookup (its hybrid_search companion uses "
+    "resolved_query, not the raw follow-up)."
 )
 
 
@@ -234,10 +247,12 @@ async def _llm_route(query: str, history_block: str = "") -> RouteDecision | Non
             needs_retrieval=False,
         )
 
+    resolved_query = str(data.get("resolved_query") or "").strip() or None
+    effective_query = resolved_query or query
     if tool in {"hybrid_search", "dense_search", "sparse_search", "hyde_search"} and "query" not in args:
-        args["query"] = query
+        args["query"] = effective_query
     if tool == "decompose_and_search" and "query" not in args:
-        args["query"] = query
+        args["query"] = effective_query
     return RouteDecision(
         kind=str(kind),
         suggested_tool=str(tool),
@@ -245,6 +260,7 @@ async def _llm_route(query: str, history_block: str = "") -> RouteDecision | Non
         rationale=str(data.get("rationale", "")),
         confidence=float(data.get("confidence", 0.5)),
         via="llm",
+        resolved_query=resolved_query,
     )
 
 
