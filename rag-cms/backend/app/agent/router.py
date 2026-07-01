@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -213,22 +214,34 @@ def _format_history(prior_turns: list[dict] | None) -> str:
 
 
 async def _llm_route(query: str, history_block: str = "") -> RouteDecision | None:
-    try:
-        raw = await chat(
-            [
-                {"role": "system", "content": _ROUTE_SYSTEM},
-                {"role": "user", "content": f"{history_block}CURRENT QUESTION:\n{query}"
-                                            if history_block else query},
-            ],
-            temperature=0.0,
-            response_format={"type": "json_object"},
-            max_tokens=800,  # 300 truncated the JSON ("Unterminated string") and
-                             # dropped the route to a low-confidence fallback, which
-                             # skipped pre-search; 800 lets the router JSON complete.
-        )
-        data = json.loads(raw)
-    except Exception as e:
-        log.warning("llm_route failed: %s", e)
+    # One retry: a failure here doesn't just mean a worse tool pick, it means
+    # smalltalk/off-topic detection is skipped entirely (the regex fast-path
+    # can't catch free-form off-topic like "какая погода?"), so the query falls
+    # through to a full hybrid_search + LLM-answer pass instead of the cheap
+    # short-circuit — still safe (the answering model won't fabricate), just
+    # needlessly expensive. A transient 429/timeout shouldn't cost that.
+    data = None
+    for attempt in range(2):
+        try:
+            raw = await chat(
+                [
+                    {"role": "system", "content": _ROUTE_SYSTEM},
+                    {"role": "user", "content": f"{history_block}CURRENT QUESTION:\n{query}"
+                                                if history_block else query},
+                ],
+                temperature=0.0,
+                response_format={"type": "json_object"},
+                max_tokens=800,  # 300 truncated the JSON ("Unterminated string") and
+                                 # dropped the route to a low-confidence fallback, which
+                                 # skipped pre-search; 800 lets the router JSON complete.
+            )
+            data = json.loads(raw)
+            break
+        except Exception as e:
+            log.warning("llm_route failed (attempt %d/2): %s", attempt + 1, e)
+            if attempt == 0:
+                await asyncio.sleep(1.0)
+    if data is None:
         return None
 
     kind = data.get("kind") or "free_text"
