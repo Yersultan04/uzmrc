@@ -16,9 +16,27 @@ from app.schemas import MemberInvite, MemberOut, RagCreate, RagOut, RagStatsOut
 
 router = APIRouter()
 
+# rag.settings.models can carry per-RAG API keys (see app.presets.Preset /
+# resolve_models_for_rag). They must never reach the client — GET /api/rags
+# and /api/rags/{id} are readable by any member, not just the owner/admin.
+_SECRET_MODEL_KEYS = ("llm_api_key", "embed_api_key")
+
+
+def _sanitize_settings(settings: dict | None) -> dict:
+    safe = dict(settings or {})
+    models = safe.get("models")
+    if isinstance(models, dict):
+        masked = dict(models)
+        for key in _SECRET_MODEL_KEYS:
+            if masked.get(key):
+                masked[key] = "***"
+        safe["models"] = masked
+    return safe
+
 
 async def _decorate(db: AsyncSession, rag: Rag, user: User) -> RagOut:
     out = RagOut.model_validate(rag)
+    out.settings = _sanitize_settings(out.settings)
     role, status = await role_in_rag(db, rag, user)
     out.role = role
     out.member_status = status
