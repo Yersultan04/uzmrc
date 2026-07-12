@@ -337,7 +337,16 @@ async def _call_llm_for_step(
     base_url: str | None = None,
     api_key: str | None = None,
     provider_order: list[str] | None = None,
+    reasoning_effort: str | None = None,
 ) -> NextStepEnvelope:
+    # max_tokens 10000 was sized for a reasoning model burning hidden reasoning
+    # tokens on top of the visible answer (see reasoning_effort below). Without
+    # reasoning_effort set (i.e. llm_model isn't a reasoning model — e.g. the
+    # non-hybrid default of running the loop on the RAG's own quality model
+    # like gpt-4o), that budget is pure dead weight the provider still has to
+    # account for; 4000 matches _single_pass_answer's cap, which already proved
+    # enough for long narrative answers with multiple citations.
+    max_tokens = 10000 if reasoning_effort else 4000
     last_err: Exception | None = None
     for attempt in range(2):
         try:
@@ -346,14 +355,11 @@ async def _call_llm_for_step(
                 model=llm_model,
                 temperature=0.1,
                 response_format={"type": "json_object"},
-                max_tokens=10000,  # with reasoning_effort="low" the model burns far fewer
-                                   # reasoning tokens; 10k fits low-reasoning + a long answer
-                                   # and cuts TPM pressure (fewer 429s) vs the old 30k reserve.
+                max_tokens=max_tokens,
                 base_url=base_url,
                 api_key=api_key,
                 provider_order=provider_order,
-                reasoning_effort="low",  # small corpus → low reasoning is enough and
-                                         # much faster per step; grounding pass guards quality
+                reasoning_effort=reasoning_effort,
             )
             return _parse_step(raw)
         except (ValueError, ValidationError) as e:
@@ -970,9 +976,22 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                     log.warning("seed search failed: %s", e)
 
             # v2 single-pass: with the pool seeded, answer in ONE LLM call (quality
-            # model) instead of the multi-step loop. Falls back to the loop only for
-            # complex (multi-entity / aggregate) queries. Cuts ~4 LLM calls → ~2.
-            if pool and (route is None or route.kind not in ("multi_entity", "aggregate")):
+            # model) instead of the multi-step loop. Cuts ~4 LLM calls → ~2.
+            #
+            # multi_entity/aggregate questions (trends, comparisons across many
+            # documents) get single-pass tried FIRST too, not skipped outright —
+            # prod telemetry (2026-07-02) showed the old always-skip-to-loop path
+            # barely grew the pool past the seed search (12->14 chunks) before
+            # answering, i.e. the extra decompose_and_search machinery usually
+            # wasn't even needed, yet every such question paid the loop's much
+            # heavier per-step cost (max_tokens 10000 + a Union JSON schema vs.
+            # single-pass's 4000 + a flat schema) for nothing — 68-91s vs 5-8s.
+            # A LOW-CONFIDENCE single-pass result on these complex kinds still
+            # falls through to the loop's broader multi-subquery search instead
+            # of being accepted outright, so genuinely hard aggregate questions
+            # keep the deeper path.
+            is_complex_kind = route is not None and route.kind in ("multi_entity", "aggregate")
+            if pool:
                 try:
                     sp_answer, sp_cites, sp_conf = await _single_pass_answer(
                         query, pool,
@@ -981,20 +1000,25 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                         api_key=final_key, provider_order=final_porder,
                         prior_turns=prior_turns,
                     )
+                    if sp_answer:
+                        report = ground_citations(sp_cites, pool, sp_conf)
+                        conf = report.adjusted_confidence if sp_cites else min(sp_conf, 0.3)
+                    else:
+                        report = None
+                        conf = 0.0
+
                     # Accept the single-pass answer whenever it produced prose.
                     # With citations → grounded confidence. Without (typically a
                     # genuine "not in the documents" answer) → keep the model's
                     # low confidence and DON'T fall into the full loop, which would
                     # only wander to budget exhaustion on the same empty evidence.
-                    if sp_answer:
-                        report = ground_citations(sp_cites, pool, sp_conf)
+                    if sp_answer and not (is_complex_kind and conf < 0.5):
                         await broker.publish(
                             "grounding_report",
                             {"step": 1, "grounded": report.grounded_count,
                              "total": report.total, "fraction": round(report.fraction, 3),
                              "adjusted_confidence": round(report.adjusted_confidence, 3)},
                         )
-                        conf = report.adjusted_confidence if sp_cites else min(sp_conf, 0.3)
                         final_obj = FinalAnswer(
                             thought="single-pass answer from pre-searched evidence",
                             answer=sp_answer, citations=sp_cites,
@@ -1030,6 +1054,12 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                         base_url=step_base,
                         api_key=step_key,
                         provider_order=None,
+                        # Only meaningful when hybrid is on and step_model is a
+                        # genuine fast reasoning model (e.g. Cerebras gpt-oss-120b) —
+                        # sending it to the RAG's own quality model (e.g. gpt-4o,
+                        # the non-hybrid default) doesn't speed anything up, it's
+                        # an unsupported field the provider has to shrug off.
+                        reasoning_effort=("low" if hybrid else None),
                     )
                 except Exception as e:
                     history.append(
