@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from openai import AsyncOpenAI
 
 from app.config import get_settings
+from app.security.dlp import sanitize_messages
 
 
 def _role_env(role: str) -> tuple[str | None, str | None]:
@@ -121,7 +122,7 @@ async def chat(
 
     kwargs: dict = {
         "model": model or default_model,
-        "messages": messages,
+        "messages": sanitize_messages(messages, where="llm.chat"),
         "temperature": temperature,
     }
     if response_format is not None:
@@ -176,7 +177,7 @@ async def chat_stream(
 
     kwargs: dict = {
         "model": model or default_model,
-        "messages": messages,
+        "messages": sanitize_messages(messages, where="llm.chat_stream"),
         "temperature": temperature,
         "stream": True,
     }
