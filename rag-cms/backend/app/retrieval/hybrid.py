@@ -16,7 +16,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.clients.embeddings import embed_query
 from app.config import get_settings
 from app.models import Chunk, Rag
 from app.presets import resolve_models_for_rag
@@ -93,9 +92,13 @@ async def hybrid_search(
 
     fts_lang: str = "simple"
     rag_models: dict | None = None
+    # Uzbek script expansion is on unless the RAG opts out (A/B measurement).
+    expand_scripts = True
     rag_row = (await db.execute(select(Rag).where(Rag.id == rag_id))).scalar_one_or_none()
     if rag_row is not None:
-        fts_lang = (rag_row.settings or {}).get("fts_language") or "simple"
+        rag_settings = rag_row.settings or {}
+        fts_lang = rag_settings.get("fts_language") or "simple"
+        expand_scripts = bool(rag_settings.get("uz_script_expansion", True))
         rag_models = resolve_models_for_rag(rag_row)
 
     async def _dense_leg() -> list[DenseHit]:
@@ -108,6 +111,7 @@ async def hybrid_search(
             top_k=s.retrieval_top_k_dense,
             rag_models=rag_models,
             query_vector=query_vector,
+            expand_scripts=expand_scripts,
         )
 
     async def _sparse_leg() -> list[SparseHit]:
@@ -119,6 +123,7 @@ async def hybrid_search(
             query,
             top_k=s.retrieval_top_k_sparse,
             language=fts_lang,
+            expand_scripts=expand_scripts,
         )
 
     dense_hits, sparse_hits = await asyncio.gather(_dense_leg(), _sparse_leg())
