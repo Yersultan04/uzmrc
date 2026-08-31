@@ -3,7 +3,9 @@ from __future__ import annotations
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.security.pii import mask
 
 
 class Citation(BaseModel):
@@ -49,7 +51,16 @@ class NextStepEnvelope(BaseModel):
 
 
 class PoolEntry(BaseModel):
-    """Lightweight view of a chunk for prompt context."""
+    """Lightweight view of a chunk for prompt context.
+
+    Personal identifiers are masked on construction rather than at the call
+    site that builds the prompt. The pool is assembled in several places and
+    flows on to the prompt, to grounding and to the citations shown to the
+    user; masking here is the one point every path goes through, so nothing
+    downstream can leak what the spec forbids leaving the perimeter. It also
+    keeps grounding honest — the model quotes the masked text it was given, and
+    grounding compares against that same text.
+    """
 
     chunk_id: uuid.UUID
     file_id: uuid.UUID
@@ -59,6 +70,13 @@ class PoolEntry(BaseModel):
     heading: str | None = None
     text: str
     score: float = 0.0
+
+    @field_validator("text", "heading")
+    @classmethod
+    def _mask_pii(cls, v: str | None) -> str | None:
+        if not v:
+            return v
+        return mask(v)[0]
 
 
 class AgentRunStartRequest(BaseModel):
