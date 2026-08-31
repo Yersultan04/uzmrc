@@ -21,6 +21,7 @@ from app.agent.prompts import (
     build_system_message,
     check_restricted_topics,
 )
+from app.agent.refcheck import verify_references
 from app.agent.router import RouteDecision, route_query
 from app.agent.schemas import (
     Citation,
@@ -510,11 +511,12 @@ async def _best_effort_final(
         log.warning("best-effort synthesis failed: %s", e)
         return None
     report = ground_citations(cites, pool, 0.35)
+    refs = verify_references(answer or "", pool)
     return FinalAnswer(
         thought="Budget exhausted; answering from the retrieved evidence.",
         answer=answer,
         citations=cites,
-        confidence=min(report.adjusted_confidence, 0.5),
+        confidence=min(report.adjusted_confidence, 0.5) * refs.fraction,
     )
 
 
@@ -1007,6 +1009,17 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                         report = None
                         conf = 0.0
 
+                    # A quote can be verbatim yet hung on an invented address —
+                    # "статья 47" of a document with 30 articles. Grounding can't
+                    # see that; refcheck can. Unsupported references scale
+                    # confidence down so the answer never asserts them flatly.
+                    refs = verify_references(sp_answer or "", pool)
+                    conf *= refs.fraction
+                    ref_warnings = [
+                        f"ссылка не подтверждена источниками: {c.ref.raw}"
+                        for c in refs.unverified
+                    ]
+
                     # Accept the single-pass answer whenever it produced prose.
                     # With citations → grounded confidence. Without (typically a
                     # genuine "not in the documents" answer) → keep the model's
@@ -1017,7 +1030,10 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                             "grounding_report",
                             {"step": 1, "grounded": report.grounded_count,
                              "total": report.total, "fraction": round(report.fraction, 3),
-                             "adjusted_confidence": round(report.adjusted_confidence, 3)},
+                             "adjusted_confidence": round(report.adjusted_confidence, 3),
+                             "refs_total": refs.total,
+                             "refs_unverified": len(refs.unverified),
+                             "refs_fraction": round(refs.fraction, 3)},
                         )
                         final_obj = FinalAnswer(
                             thought="single-pass answer from pre-searched evidence",
@@ -1031,7 +1047,7 @@ async def run_agent(rag_id: uuid.UUID, run_id: uuid.UUID, query: str, max_steps:
                             {"step": 1, "answer": final_obj.answer,
                              "confidence": final_obj.confidence, "raw_confidence": sp_conf,
                              "citations": [c.model_dump(mode="json") for c in final_obj.citations],
-                             "warnings": []},
+                             "warnings": ref_warnings},
                         )
                 except Exception as e:
                     log.warning("single-pass failed, falling back to loop: %s", e)
